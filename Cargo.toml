@@ -1,0 +1,6 @@
+[package]
+name = "syntixi-vm"
+version = "0.1.0"
+authors = ["RyanSquared <vandor2012@gmail.com>"]
+
+[dependencies]
