@@ -30,13 +30,14 @@ macro_rules! expand {
 #[allow(dead_code)]
 impl LoadState {
     pub fn from_read(mut input: impl ::std::io::Read,
-                 name: impl ::std::fmt::Display) -> LoadState {
+                 name: impl Into<String>) -> LoadState {
         let mut buffer: Vec<u8> = Vec::new();
+        let string_name = name.into();
         input.read_to_end(&mut buffer).expect(
-            &format!("no values read from buffer: {}", name));
+            &format!("no values read from buffer: {}", string_name));
         LoadState {
             input: Box::new(buffer.into_iter()),
-            name: Box::new(format!("{}", name)),
+            name: Box::new(string_name),
         }
     }
 
