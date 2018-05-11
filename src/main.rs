@@ -10,7 +10,7 @@ fn main() -> std::io::Result<()> {
         },
         Some(file) => {
             let handle = File::open(file)?;
-            let mut state = undump::LoadState::from_read(handle, file);
+            let mut state = undump::LoadState::from_read(handle, file.clone());
             state.check_header();
             println!("test!");
             Ok(())
