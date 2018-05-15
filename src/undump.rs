@@ -184,7 +184,9 @@ impl LoadState {
         proto.protos.clear();
         proto.protos.reserve(count as usize);
         for _ in 0..(count) {
-            proto.protos.push(Proto::new());
+            let mut new_proto = Proto::new();
+            self.load_function(&mut new_proto, vec![])?;
+            proto.protos.push(new_proto);
         }
         Ok(())
     }
