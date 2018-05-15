@@ -47,14 +47,21 @@ macro_rules! expand {
 #[allow(dead_code)]
 impl LoadState {
     pub fn from_read(mut input: impl ::std::io::Read,
-                 name: impl Into<String>) -> Result<Proto, String> {
+                     name: impl Into<String>) -> Result<Proto, String> {
         let mut buffer: Vec<u8> = Vec::new();
-        let string_name = name.into();
-        input.read_to_end(&mut buffer).expect(
-            &format!("no values read from buffer: {}", string_name));
+        let into_name = name.into();
+        if let Ok(_) = input.read_to_end(&mut buffer) {
+            LoadState::from_u8(buffer, into_name.clone())
+        } else {
+            Err(format!("no values read from buffer: {}", into_name))
+        }
+    }
+
+    pub fn from_u8(buffer: Vec<u8>,
+                   name: impl Into<String>) -> Result<Proto, String> {
         let mut state = LoadState {
             input: Box::new(buffer.into_iter()),
-            name: Box::new(string_name),
+            name: Box::new(name.into()),
             state: None,
         };
         let proto = state.load_chunk(state::SyxState::new())?;
