@@ -58,7 +58,7 @@ impl LoadState {
             state: None,
         };
         state.load_chunk(state::SyxState::new())?;
-        match state.load_byte() {
+        match state.load::<u8>() {
             Err(_) => Ok(state),
             Ok(_) => Err("bytes left over in stream, did not load all code".to_owned()),
         }
@@ -79,12 +79,10 @@ impl LoadState {
         Err(format!("Error with {}: {}", self.name, err))
     }
 
-    fn load_byte(&mut self) -> Result<u8, String> {
-        self.input.next().ok_or("could not load byte".to_owned())
-    }
-    
     fn load_range(&mut self, range: usize) -> Result<Vec<u8>, String> {
-        Ok(self.input.by_ref().take(range).collect())
+        let v: Vec<u8> = self.input.by_ref().take(range).collect();
+        self.assert_verification(v.len() == range, format!("Not enough bytes: {}", range))?;
+        Ok(v)
         // made redundant by the above
         /*
         let mut ret: Vec<u8> = Vec::with_capacity(range);
@@ -112,13 +110,16 @@ impl LoadState {
          * 3. All values of type `Primitives` are defined at the top of this
          *    file and will always be Rust primitives.
          */
+        // ::TODO:: optimize for <u8> when specializations lands:
+        // https://github.com/rust-lang/rust/issues/31844
+        // https://github.com/rust-lang/rfcs/blob/master/text/1210-impl-specialization.md
         let size = ::std::mem::size_of::<T>();
         let bytes = self.load_range(size)?;
         Ok(unsafe {* ::std::mem::transmute::<&u8, &T>(&bytes[0])})
     }
 
     fn load_string(&mut self) -> Result<SyxString, String> {
-        let mut size: usize = self.load_byte()? as usize;
+        let mut size: usize = self.load::<u8>()? as usize;
         if size == 0xFF {
             size = self.load::<usize>()?;
         }
@@ -146,9 +147,9 @@ impl LoadState {
         proto.constants.clear();
         for _ in 0..constant_count {
             // get type from byte
-            proto.constants.push(match SyxType::from_u8(self.load_byte()?) {
+            proto.constants.push(match SyxType::from_u8(self.load::<u8>()?) {
                 SyxType::TNIL => SyxValue::Nil,
-                SyxType::TBOOLEAN => SyxValue::Bool(self.load_byte()? == 1),
+                SyxType::TBOOLEAN => SyxValue::Bool(self.load::<u8>()? == 1),
                 SyxType::TNUMFLT => SyxValue::Number(self.load::<SyxNumber>()?),
                 SyxType::TNUMINT => SyxValue::Integer(self.load::<SyxInteger>()?),
                 | SyxType::TSHRSTR
@@ -188,8 +189,8 @@ impl LoadState {
         for _ in 0..upvalues_count {
             proto.upvalues.push(Upvalue {
                 name: vec![],
-                instack: self.load_byte()?,
-                idx: self.load_byte()?,
+                instack: self.load::<u8>()?,
+                idx: self.load::<u8>()?,
             })
         }
         Ok(())
@@ -238,9 +239,9 @@ impl LoadState {
         };
         proto.linedefined = self.load::<SyxInt>()?;
         proto.lastlinedefined = self.load::<SyxInt>()?;
-        proto.numparams = self.load_byte()?;
-        proto.is_vararg = self.load_byte()? != 0;
-        proto.maxstacksize = self.load_byte()?;
+        proto.numparams = self.load::<u8>()?;
+        proto.is_vararg = self.load::<u8>()? != 0;
+        proto.maxstacksize = self.load::<u8>()?;
         self.load_code(proto)?;
         self.load_constants(proto)?;
         self.load_upvalues(proto)?;
@@ -252,7 +253,7 @@ impl LoadState {
     fn check_size(&mut self, size: (usize, &'static str))
         -> SyxResult
     {
-        if let Ok(bytecode_size) = self.load_byte() {
+        if let Ok(bytecode_size) = self.load::<u8>() {
             self.assert_verification(bytecode_size == (size.0 as u8),
                                      format!("size mismatch: {}", size.1))
         } else {
@@ -274,9 +275,9 @@ impl LoadState {
 
     fn check_header(&mut self) -> SyxResult {
         self.check_literal(SYX_HEADER, "header")?;
-        let bt = self.load_byte()?;
+        let bt = self.load::<u8>()?;
         self.assert_verification(bt == SYX_VERSION, "version mismatch")?;
-        let bt = self.load_byte()?;
+        let bt = self.load::<u8>()?;
         self.assert_verification(bt == SYX_FORMAT, "format mismatch")?;
         self.check_literal(SYX_DATA, "load order verification")?;
         self.check_size(expand!(i32))?;
@@ -297,9 +298,8 @@ impl LoadState {
         // cl->p
         self.check_header()?;
         let mut proto = Proto::new();
-        let _upvals = self.load_byte()?;
+        let _upvals = self.load::<u8>()?;
         self.load_function(&mut proto, vec![])?;
-        println!("opcodes: {}", proto.instructions.len());
         Ok(())
     }
 }
