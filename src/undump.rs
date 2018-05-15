@@ -47,7 +47,7 @@ macro_rules! expand {
 #[allow(dead_code)]
 impl LoadState {
     pub fn from_read(mut input: impl ::std::io::Read,
-                 name: impl Into<String>) -> Result<LoadState, String> {
+                 name: impl Into<String>) -> Result<Proto, String> {
         let mut buffer: Vec<u8> = Vec::new();
         let string_name = name.into();
         input.read_to_end(&mut buffer).expect(
@@ -57,9 +57,9 @@ impl LoadState {
             name: Box::new(string_name),
             state: None,
         };
-        state.load_chunk(state::SyxState::new())?;
+        let proto = state.load_chunk(state::SyxState::new())?;
         match state.load::<u8>() {
-            Err(_) => Ok(state),
+            Err(_) => Ok(proto),
             Ok(_) => Err("bytes left over in stream, did not load all code".to_owned()),
         }
     }
@@ -292,7 +292,9 @@ impl LoadState {
         Ok(())
     }
 
-    fn load_chunk(&mut self, _lstate: state::SyxState) -> SyxResult {
+    fn load_chunk(&mut self, _lstate: state::SyxState)
+        -> Result<Proto, String>
+    {
         self.state = Some(state::SyxState {});
         // ::TODO:: ::XXX:: here is where i left off
         // cl->p
@@ -300,6 +302,6 @@ impl LoadState {
         let mut proto = Proto::new();
         let _upvals = self.load::<u8>()?;
         self.load_function(&mut proto, vec![])?;
-        Ok(())
+        Ok(proto)
     }
 }
