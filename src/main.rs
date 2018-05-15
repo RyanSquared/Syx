@@ -1,4 +1,7 @@
-pub mod undump;
+mod undump;
+mod limits;
+mod object;
+mod state;
 
 use std::fs::File;
 
@@ -10,9 +13,10 @@ fn main() -> std::io::Result<()> {
         },
         Some(file) => {
             let handle = File::open(file)?;
-            let mut state = undump::LoadState::from_read(handle, file);
-            state.check_header();
-            println!("test!");
+            match undump::LoadState::from_read(handle, file.clone()) {
+                Err(err) => panic!("fail! => {}", err),
+                Ok(_state) => ()
+            }
             Ok(())
         }
     }
