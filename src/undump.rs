@@ -1,6 +1,6 @@
 use super::limits;
 use super::object::{Instruction, SyxInteger, SyxInt, SyxNumber, SyxString,
-                    Proto, SyxValue, SyxType, Upvalue};
+                    Proto, LocVar, SyxValue, SyxType, Upvalue};
 use super::state;
 
 type SyxResult = Result<(), String>;
@@ -203,14 +203,16 @@ impl LoadState {
         for _ in 0..lines {
             proto.lineinfo.push(self.load::<SyxInt>()?);
         }
-        // ::TODO:: load LocVars
-        // for now? trash them
         let size = self.load::<SyxInt>()? as usize;
+        proto.locvars.clear();
+        proto.locvars.reserve(size);
         // load locvars
         for _ in 0..size {
-            self.load_string()?; // varname
-            self.load::<SyxInt>()?; // startpc
-            self.load::<SyxInt>()?; // endpc
+            proto.locvars.push(LocVar {
+                varname: self.load_string()?,
+                startpc: self.load::<SyxInt>()?,
+                endpc: self.load::<SyxInt>()?,
+            });
         }
         // end trash
         let upvalue_count = self.load::<SyxInt>()? as usize;
