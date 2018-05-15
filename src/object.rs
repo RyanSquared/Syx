@@ -62,6 +62,12 @@ pub struct Upvalue {
     pub idx: u8,
 }
 
+pub struct LocVar {
+    pub varname: SyxString, // name of local variable
+    pub startpc: SyxInt, // point where variable is alive
+    pub endpc: SyxInt, // point where variable is dead
+}
+
 pub struct Proto { // Function Prototypes
     pub numparams: u8, // number of fixed parameters (does not include vararg)
     pub is_vararg: bool, // should be obvious
@@ -74,7 +80,7 @@ pub struct Proto { // Function Prototypes
     pub protos: Vec<Proto>, // functions defined in this function
     pub lineinfo: Vec<i32>, // map from opcode to source lines ::TODO:: what?
     pub upvalues: Vec<Upvalue>, // upvalue information
-    // ::TODO:: locvars
+    pub locvars: Vec<LocVar>, // local variables
     pub source: String,
 }
 
@@ -92,6 +98,7 @@ impl Proto {
             protos: Vec::new(),
             lineinfo: Vec::new(),
             upvalues: Vec::new(),
+            locvars: Vec::new(),
             source: "".to_owned(),
         }
     } 
