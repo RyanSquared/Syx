@@ -1,6 +1,6 @@
 use super::limits;
 use super::object::{Instruction, SyxInteger, SyxInt, SyxNumber, SyxString,
-                    Proto, SyxValue, SyxType, Upvalue};
+                    Proto, LocVar, SyxValue, SyxType, Upvalue};
 use super::state;
 
 type SyxResult = Result<(), String>;
@@ -47,19 +47,26 @@ macro_rules! expand {
 #[allow(dead_code)]
 impl LoadState {
     pub fn from_read(mut input: impl ::std::io::Read,
-                 name: impl Into<String>) -> Result<LoadState, String> {
+                     name: impl Into<String>) -> Result<Proto, String> {
         let mut buffer: Vec<u8> = Vec::new();
-        let string_name = name.into();
-        input.read_to_end(&mut buffer).expect(
-            &format!("no values read from buffer: {}", string_name));
+        let into_name = name.into();
+        if let Ok(_) = input.read_to_end(&mut buffer) {
+            LoadState::from_u8(buffer, into_name.clone())
+        } else {
+            Err(format!("no values read from buffer: {}", into_name))
+        }
+    }
+
+    pub fn from_u8(buffer: Vec<u8>,
+                   name: impl Into<String>) -> Result<Proto, String> {
         let mut state = LoadState {
             input: Box::new(buffer.into_iter()),
-            name: Box::new(string_name),
+            name: Box::new(name.into()),
             state: None,
         };
-        state.load_chunk(state::SyxState::new())?;
+        let proto = state.load_chunk(state::SyxState::new())?;
         match state.load::<u8>() {
-            Err(_) => Ok(state),
+            Err(_) => Ok(proto),
             Ok(_) => Err("bytes left over in stream, did not load all code".to_owned()),
         }
     }
@@ -177,7 +184,9 @@ impl LoadState {
         proto.protos.clear();
         proto.protos.reserve(count as usize);
         for _ in 0..(count) {
-            proto.protos.push(Proto::new());
+            let mut new_proto = Proto::new();
+            self.load_function(&mut new_proto, vec![])?;
+            proto.protos.push(new_proto);
         }
         Ok(())
     }
@@ -203,14 +212,16 @@ impl LoadState {
         for _ in 0..lines {
             proto.lineinfo.push(self.load::<SyxInt>()?);
         }
-        // ::TODO:: load LocVars
-        // for now? trash them
         let size = self.load::<SyxInt>()? as usize;
+        proto.locvars.clear();
+        proto.locvars.reserve(size);
         // load locvars
         for _ in 0..size {
-            self.load_string()?; // varname
-            self.load::<SyxInt>()?; // startpc
-            self.load::<SyxInt>()?; // endpc
+            proto.locvars.push(LocVar {
+                varname: self.load_string()?,
+                startpc: self.load::<SyxInt>()?,
+                endpc: self.load::<SyxInt>()?,
+            });
         }
         // end trash
         let upvalue_count = self.load::<SyxInt>()? as usize;
@@ -292,7 +303,9 @@ impl LoadState {
         Ok(())
     }
 
-    fn load_chunk(&mut self, _lstate: state::SyxState) -> SyxResult {
+    fn load_chunk(&mut self, _lstate: state::SyxState)
+        -> Result<Proto, String>
+    {
         self.state = Some(state::SyxState {});
         // ::TODO:: ::XXX:: here is where i left off
         // cl->p
@@ -300,6 +313,6 @@ impl LoadState {
         let mut proto = Proto::new();
         let _upvals = self.load::<u8>()?;
         self.load_function(&mut proto, vec![])?;
-        Ok(())
+        Ok(proto)
     }
 }
