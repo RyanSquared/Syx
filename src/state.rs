@@ -1,5 +1,4 @@
-pub struct SyxState {
-}
+pub struct SyxState {}
 
 impl SyxState {
     pub fn new() -> SyxState {

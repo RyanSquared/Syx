@@ -43,7 +43,7 @@ impl SyxType {
             6 => SyxType::TFUNCTION,
             7 => SyxType::TUSERDATA,
             8 => SyxType::TTHREAD,
-            _ => panic!("invalid parameter passed to from_u8({})", value)
+            _ => panic!("invalid parameter passed to from_u8({})", value),
         }
     }
 }
@@ -64,21 +64,22 @@ pub struct Upvalue {
 
 pub struct LocVar {
     pub varname: SyxString, // name of local variable
-    pub startpc: SyxInt, // point where variable is alive
-    pub endpc: SyxInt, // point where variable is dead
+    pub startpc: SyxInt,    // point where variable is alive
+    pub endpc: SyxInt,      // point where variable is dead
 }
 
-pub struct Proto { // Function Prototypes
-    pub numparams: u8, // number of fixed parameters (does not include vararg)
-    pub is_vararg: bool, // should be obvious
-    pub maxstacksize: u8, // amount of registers needed
+pub struct Proto {
+    // Function Prototypes
+    pub numparams: u8,       // number of fixed parameters (does not include vararg)
+    pub is_vararg: bool,     // should be obvious
+    pub maxstacksize: u8,    // amount of registers needed
     pub linedefined: SyxInt, // debug
     pub lastlinedefined: SyxInt, // debug
     pub constants: Vec<SyxValue>, // constants used by the function
-    pub ip: i32, // instruction pointer, used for instruction index
+    pub ip: i32,             // instruction pointer, used for instruction index
     pub instructions: Vec<Instruction>, // function opcodes
-    pub protos: Vec<Proto>, // functions defined in this function
-    pub lineinfo: Vec<i32>, // map from opcode to source lines ::TODO:: what?
+    pub protos: Vec<Proto>,  // functions defined in this function
+    pub lineinfo: Vec<i32>,  // map from opcode to source lines ::TODO:: what?
     pub upvalues: Vec<Upvalue>, // upvalue information
     pub locvars: Vec<LocVar>, // local variables
     pub source: String,
@@ -101,7 +102,7 @@ impl Proto {
             locvars: Vec::new(),
             source: "".to_owned(),
         }
-    } 
+    }
 }
 
 // typedef struct Proto {

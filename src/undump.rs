@@ -1,7 +1,8 @@
-use super::limits;
-use super::object::{Instruction, SyxInteger, SyxInt, SyxNumber, SyxString,
-                    Proto, LocVar, SyxValue, SyxType, Upvalue};
-use super::state;
+use super::object::{
+    Instruction, LocVar, Proto, SyxInt, SyxInteger, SyxNumber, SyxString, SyxType, SyxValue,
+    Upvalue,
+};
+use super::{limits, state};
 
 type SyxResult = Result<(), String>;
 
@@ -13,11 +14,11 @@ const SYX_VERSION_MINOR: u8 = 0x3;
 // Verification information
 
 // <ESC>Lua, can't have <ESC> in source, so it's a useful escape character
-const SYX_HEADER: &[u8] = b"\x1bLua"; 
+const SYX_HEADER: &[u8] = b"\x1bLua";
 
 const SYX_DATA: &[u8] = b"\x19\x93\r\n\x1a\n";
 const SYX_VERSION: u8 = SYX_VERSION_MAJOR * 16 + SYX_VERSION_MINOR;
-const SYX_FORMAT: u8  = 0; // official PUC-Rio format
+const SYX_FORMAT: u8 = 0; // official PUC-Rio format
 const SYX_INT: SyxInteger = 0x5678;
 const SYX_NUM: SyxNumber = (370.5f32 as SyxNumber);
 
@@ -41,24 +42,25 @@ primitive!(f32, f64);
 macro_rules! expand {
     ($item:ty) => {{
         (::std::mem::size_of::<$item>(), stringify!($item))
-    }}
+    }};
 }
 
 #[allow(dead_code)]
 impl LoadState {
-    pub fn from_read(mut input: impl ::std::io::Read,
-                     name: impl Into<String>) -> Result<Proto, String> {
+    pub fn from_read(
+        mut input: impl ::std::io::Read,
+        name: impl Into<String>,
+    ) -> Result<Proto, String> {
         let mut buffer: Vec<u8> = Vec::new();
         let into_name = name.into();
-        if let Ok(_) = input.read_to_end(&mut buffer) {
+        if input.read_to_end(&mut buffer).is_ok() {
             LoadState::from_u8(buffer, into_name.clone())
         } else {
             Err(format!("no values read from buffer: {}", into_name))
         }
     }
 
-    pub fn from_u8(buffer: Vec<u8>,
-                   name: impl Into<String>) -> Result<Proto, String> {
+    pub fn from_u8(buffer: Vec<u8>, name: impl Into<String>) -> Result<Proto, String> {
         let mut state = LoadState {
             input: Box::new(buffer.into_iter()),
             name: Box::new(name.into()),
@@ -71,18 +73,14 @@ impl LoadState {
         }
     }
 
-    fn assert_verification(&mut self, val: bool, err: impl ::std::fmt::Display)
-        -> SyxResult
-    {
+    fn assert_verification(&mut self, val: bool, err: impl ::std::fmt::Display) -> SyxResult {
         if !val {
             return self.raise_from_verification(err);
         }
         Ok(())
     }
 
-    fn raise_from_verification(&mut self, err: impl ::std::fmt::Display)
-        -> SyxResult
-    {
+    fn raise_from_verification(&mut self, err: impl ::std::fmt::Display) -> SyxResult {
         Err(format!("Error with {}: {}", self.name, err))
     }
 
@@ -122,7 +120,7 @@ impl LoadState {
         // https://github.com/rust-lang/rfcs/blob/master/text/1210-impl-specialization.md
         let size = ::std::mem::size_of::<T>();
         let bytes = self.load_range(size)?;
-        Ok(unsafe {* ::std::mem::transmute::<&u8, &T>(&bytes[0])})
+        Ok(unsafe { *(&bytes[0] as *const u8 as *const T) })
     }
 
     fn load_string(&mut self) -> Result<SyxString, String> {
@@ -134,17 +132,16 @@ impl LoadState {
             // Turns out it can happen with stripped debug info. We'll just
             // return an empty string as it's not likely to be empty if it does
             // exist - wait, what happens in PUC-Rio Lua?..
-            return Ok(vec![]);
+            Ok(vec![])
         } else {
             // So, Lua has a concept of "short" and "long" strings. This can be
             // optimized later in the future, as well as the SyxString type, to
             // include a hash field.
             size -= 1;
             if size < limits::SYX_MAXSHORTLEN {
-                // short string
-                return self.load_range(size);
-            } else { // long string
-                return self.load_range(size);
+                self.load_range(size)
+            } else {
+                self.load_range(size)
             }
         }
     }
@@ -159,8 +156,7 @@ impl LoadState {
                 SyxType::TBOOLEAN => SyxValue::Bool(self.load::<u8>()? == 1),
                 SyxType::TNUMFLT => SyxValue::Number(self.load::<SyxNumber>()?),
                 SyxType::TNUMINT => SyxValue::Integer(self.load::<SyxInteger>()?),
-                | SyxType::TSHRSTR
-                | SyxType::TLNGSTR => SyxValue::String(self.load_string()?),
+                | SyxType::TSHRSTR | SyxType::TLNGSTR => SyxValue::String(self.load_string()?),
                 x => {
                     return Err(format!("bad value for constant: {:?}", x));
                 }
@@ -190,7 +186,7 @@ impl LoadState {
         }
         Ok(())
     }
-    
+
     fn load_upvalues(&mut self, proto: &mut Proto) -> SyxResult {
         let upvalues_count = self.load::<SyxInt>()?;
         proto.upvalues.clear();
@@ -228,25 +224,23 @@ impl LoadState {
         for i in 0..upvalue_count {
             match proto.upvalues.get_mut(i) {
                 Some(value) => value.name = self.load_string()?,
-                None => return Err(format!("could not find upvalue index {}", i))
+                None => return Err(format!("could not find upvalue index {}", i)),
             }
         }
         Ok(())
     }
 
-    fn load_function(&mut self, proto: &mut Proto, source: SyxString)
-        -> SyxResult
-    {
+    fn load_function(&mut self, proto: &mut Proto, source: SyxString) -> SyxResult {
         let loaded_source = self.load_string()?;
         proto.source = match String::from_utf8({
-            if loaded_source.len() != 0 {
+            if !loaded_source.is_empty() {
                 loaded_source
             } else {
                 source
             }
         }) {
             Ok(val) => val,
-            Err(_) => return Err(format!("invalid source name"))
+            Err(_) => return Err("invalid source name".to_string()),
         };
         proto.linedefined = self.load::<SyxInt>()?;
         proto.lastlinedefined = self.load::<SyxInt>()?;
@@ -260,25 +254,26 @@ impl LoadState {
         self.load_debug(proto)?;
         Ok(())
     }
-    
-    fn check_size(&mut self, size: (usize, &'static str))
-        -> SyxResult
-    {
+
+    fn check_size(&mut self, size: (usize, &'static str)) -> SyxResult {
         if let Ok(bytecode_size) = self.load::<u8>() {
-            self.assert_verification(bytecode_size == (size.0 as u8),
-                                     format!("size mismatch: {}", size.1))
+            self.assert_verification(
+                bytecode_size == (size.0 as u8),
+                format!("size mismatch: {}", size.1),
+            )
         } else {
             Ok(())
         }
     }
 
-    fn check_literal(&mut self, value_impl: impl Into<Vec<u8>>,
-                     err: impl ::std::fmt::Display) -> SyxResult
-    {
+    fn check_literal(
+        &mut self,
+        value_impl: impl Into<Vec<u8>>,
+        err: impl ::std::fmt::Display,
+    ) -> SyxResult {
         let value = value_impl.into();
         if let Ok(literal) = self.load_range(value.len()) {
-            self.assert_verification(literal == value,
-                                     format!("literal mismatch: {}", err))
+            self.assert_verification(literal == value, format!("literal mismatch: {}", err))
         } else {
             Ok(())
         }
@@ -303,9 +298,7 @@ impl LoadState {
         Ok(())
     }
 
-    fn load_chunk(&mut self, _lstate: state::SyxState)
-        -> Result<Proto, String>
-    {
+    fn load_chunk(&mut self, _lstate: state::SyxState) -> Result<Proto, String> {
         self.state = Some(state::SyxState {});
         // ::TODO:: ::XXX:: here is where i left off
         // cl->p
