@@ -1,4 +1,4 @@
-# Syntixi-VM - A Lua VM (fork) in Rust
+# Syx - A Lua VM (fork) in Rust
 
 This is a side project for a side project. I don't suggest using this, but if
 you want to...
