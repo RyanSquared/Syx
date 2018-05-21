@@ -1,6 +1,6 @@
 use super::object::{
-    Instruction, LocVar, Proto, SyxInt, SyxInteger, SyxNumber, SyxString, SyxType, SyxValue,
-    Upvalue,
+    Instruction, LocVar, Proto, SyxInt, SyxInteger, SyxNumber, SyxString,
+    SyxType, SyxValue, Upvalue,
 };
 use super::{limits, state};
 
@@ -60,7 +60,9 @@ impl LoadState {
         }
     }
 
-    pub fn from_u8(buffer: Vec<u8>, name: impl Into<String>) -> Result<Proto, String> {
+    pub fn from_u8(buffer: Vec<u8>, name: impl Into<String>)
+        -> Result<Proto, String>
+    {
         let mut state = LoadState {
             input: Box::new(buffer.into_iter()),
             name: Box::new(name.into()),
@@ -69,24 +71,30 @@ impl LoadState {
         let proto = state.load_chunk(state::SyxState::new())?;
         match state.load::<u8>() {
             Err(_) => Ok(proto),
-            Ok(_) => Err("bytes left over in stream, did not load all code".to_owned()),
+            Ok(_) => Err("bytes left over in stream".to_owned()),
         }
     }
 
-    fn assert_verification(&mut self, val: bool, err: impl ::std::fmt::Display) -> SyxResult {
-        if !val {
-            return self.raise_from_verification(err);
+    fn assert_verification(&mut self, val: bool, err: impl ::std::fmt::Display)
+        -> SyxResult
+    {
+        return if !val {
+            self.raise_from_verification(err)
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
-    fn raise_from_verification(&mut self, err: impl ::std::fmt::Display) -> SyxResult {
+    fn raise_from_verification(&mut self, err: impl ::std::fmt::Display)
+        -> SyxResult
+    {
         Err(format!("Error with {}: {}", self.name, err))
     }
 
     fn load_range(&mut self, range: usize) -> Result<Vec<u8>, String> {
         let v: Vec<u8> = self.input.by_ref().take(range).collect();
-        self.assert_verification(v.len() == range, format!("Not enough bytes: {}", range))?;
+        self.assert_verification(v.len() == range,
+                                 format!("Not enough bytes: {}", range))?;
         Ok(v)
         // made redundant by the above
         /*
@@ -95,7 +103,8 @@ impl LoadState {
             if let Some(mut ch) = self.input.next() {
                 ret.push(ch);
             } else {
-                self.raise_from_verification(format!("Missing byte at pos: {}", i))?;
+                self.raise_from_verification(
+                    format!("Missing byte at pos: {}", i))?;
             }
         };
         Ok(ret)
@@ -154,9 +163,12 @@ impl LoadState {
             proto.constants.push(match SyxType::from_u8(self.load::<u8>()?) {
                 SyxType::TNIL => SyxValue::Nil,
                 SyxType::TBOOLEAN => SyxValue::Bool(self.load::<u8>()? == 1),
+                // these lines represent everything wrong with the world
+                // they take up more than 80 characters
                 SyxType::TNUMFLT => SyxValue::Number(self.load::<SyxNumber>()?),
                 SyxType::TNUMINT => SyxValue::Integer(self.load::<SyxInteger>()?),
-                | SyxType::TSHRSTR | SyxType::TLNGSTR => SyxValue::String(self.load_string()?),
+                | SyxType::TSHRSTR
+                | SyxType::TLNGSTR => SyxValue::String(self.load_string()?),
                 x => {
                     return Err(format!("bad value for constant: {:?}", x));
                 }
@@ -224,13 +236,16 @@ impl LoadState {
         for i in 0..upvalue_count {
             match proto.upvalues.get_mut(i) {
                 Some(value) => value.name = self.load_string()?,
-                None => return Err(format!("could not find upvalue index {}", i)),
+                None => return Err(
+                    format!("could not find upvalue index {}", i)),
             }
         }
         Ok(())
     }
 
-    fn load_function(&mut self, proto: &mut Proto, source: SyxString) -> SyxResult {
+    fn load_function(&mut self, proto: &mut Proto, source: SyxString)
+        -> SyxResult
+    {
         let loaded_source = self.load_string()?;
         proto.source = match String::from_utf8({
             if !loaded_source.is_empty() {
@@ -273,7 +288,8 @@ impl LoadState {
     ) -> SyxResult {
         let value = value_impl.into();
         if let Ok(literal) = self.load_range(value.len()) {
-            self.assert_verification(literal == value, format!("literal mismatch: {}", err))
+            self.assert_verification(literal == value,
+                                     format!("literal mismatch: {}", err))
         } else {
             Ok(())
         }
