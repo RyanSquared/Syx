@@ -2,7 +2,7 @@ use super::object::{
     Instruction, LocVar, Proto, SyxInt, SyxInteger, SyxNumber, SyxString, SyxType, SyxValue,
     Upvalue,
 };
-use super::state;
+use super::{limits, state};
 
 type SyxResult = Result<(), String>;
 
@@ -99,7 +99,8 @@ impl LoadState {
             }
         };
         Ok(ret)
-        */    }
+        */
+    }
 
     fn load<T: Copy + Primitives>(&mut self) -> Result<T, String> {
         /*
@@ -137,7 +138,11 @@ impl LoadState {
             // optimized later in the future, as well as the SyxString type, to
             // include a hash field.
             size -= 1;
-            self.load_range(size)
+            if size < limits::SYX_MAXSHORTLEN {
+                self.load_range(size)
+            } else {
+                self.load_range(size)
+            }
         }
     }
 
@@ -146,18 +151,16 @@ impl LoadState {
         proto.constants.clear();
         for _ in 0..constant_count {
             // get type from byte
-            proto
-                .constants
-                .push(match SyxType::from_u8(self.load::<u8>()?) {
-                    SyxType::TNIL => SyxValue::Nil,
-                    SyxType::TBOOLEAN => SyxValue::Bool(self.load::<u8>()? == 1),
-                    SyxType::TNUMFLT => SyxValue::Number(self.load::<SyxNumber>()?),
-                    SyxType::TNUMINT => SyxValue::Integer(self.load::<SyxInteger>()?),
-                    | SyxType::TSHRSTR | SyxType::TLNGSTR => SyxValue::String(self.load_string()?),
-                    x => {
-                        return Err(format!("bad value for constant: {:?}", x));
-                    }
-                });
+            proto.constants.push(match SyxType::from_u8(self.load::<u8>()?) {
+                SyxType::TNIL => SyxValue::Nil,
+                SyxType::TBOOLEAN => SyxValue::Bool(self.load::<u8>()? == 1),
+                SyxType::TNUMFLT => SyxValue::Number(self.load::<SyxNumber>()?),
+                SyxType::TNUMINT => SyxValue::Integer(self.load::<SyxInteger>()?),
+                | SyxType::TSHRSTR | SyxType::TLNGSTR => SyxValue::String(self.load_string()?),
+                x => {
+                    return Err(format!("bad value for constant: {:?}", x));
+                }
+            });
         }
         Ok(())
     }
