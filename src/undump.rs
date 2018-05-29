@@ -1,26 +1,44 @@
+use super::conf::{SYX_HEADER, SYX_DATA, SYX_VERSION, SYX_FORMAT, SYX_INT, SYX_NUM};
+
 use super::object::{
     Instruction, LocVar, Proto, SyxInt, SyxInteger, SyxNumber, SyxString,
     SyxType, SyxValue, Upvalue,
 };
 use super::{limits, state};
 
-type SyxResult = Result<(), String>;
+pub mod errors {
+    use super::{SyxType};
 
-// ::TODO:: move to a config or something?
+    error_chain! {
+        errors {
+            BufferNotReadable(t: String) {
+                display("no values read from buffer: {}", t),
+            }
 
-const SYX_VERSION_MAJOR: u8 = 0x5;
-const SYX_VERSION_MINOR: u8 = 0x3;
+            BufferNotEmpty {
+                display("bytes left over from buffer"),
+            }
 
-// Verification information
+            InvalidVerification(name: String, err: String) {
+                display("error verifying {}: {}", name, err)
+            }
 
-// <ESC>Lua, can't have <ESC> in source, so it's a useful escape character
-const SYX_HEADER: &[u8] = b"\x1bLua";
+            InvalidConstantType(t: SyxType) {
+                display("bad value for constant: {:?}", t)
+            }
 
-const SYX_DATA: &[u8] = b"\x19\x93\r\n\x1a\n";
-const SYX_VERSION: u8 = SYX_VERSION_MAJOR * 16 + SYX_VERSION_MINOR;
-const SYX_FORMAT: u8 = 0; // official PUC-Rio format
-const SYX_INT: SyxInteger = 0x5678;
-const SYX_NUM: SyxNumber = (370.5f32 as SyxNumber);
+            InvalidUpvalueIndex(index: usize) {
+                display("could not find upvalue index: {}", index)
+            }
+
+            InvalidSourceName {
+                display("could not match source name from UTF8")
+            }
+        }
+    }
+}
+
+use self::errors::*;
 
 pub struct LoadState {
     input: Box<Iterator<Item = u8>>,
@@ -50,18 +68,18 @@ impl LoadState {
     pub fn from_read(
         mut input: impl ::std::io::Read,
         name: impl Into<String>,
-    ) -> Result<Proto, String> {
+    ) -> Result<Proto> {
         let mut buffer: Vec<u8> = Vec::new();
         let into_name = name.into();
         if input.read_to_end(&mut buffer).is_ok() {
             LoadState::from_u8(buffer, into_name.clone())
         } else {
-            Err(format!("no values read from buffer: {}", into_name))
+            Err(ErrorKind::BufferNotReadable(into_name).into())
         }
     }
 
     pub fn from_u8(buffer: Vec<u8>, name: impl Into<String>)
-        -> Result<Proto, String>
+        -> Result<Proto>
     {
         let mut state = LoadState {
             input: Box::new(buffer.into_iter()),
@@ -71,12 +89,12 @@ impl LoadState {
         let proto = state.load_chunk(state::SyxState::new())?;
         match state.load::<u8>() {
             Err(_) => Ok(proto),
-            Ok(_) => Err("bytes left over in stream".to_owned()),
+            Ok(_) => Err(ErrorKind::BufferNotEmpty.into()),
         }
     }
 
     fn assert_verification(&mut self, val: bool, err: impl ::std::fmt::Display)
-        -> SyxResult
+        -> Result<()>
     {
         return if !val {
             self.raise_from_verification(err)
@@ -86,12 +104,13 @@ impl LoadState {
     }
 
     fn raise_from_verification(&mut self, err: impl ::std::fmt::Display)
-        -> SyxResult
+        -> Result<()>
     {
-        Err(format!("Error with {}: {}", self.name, err))
+        Err(ErrorKind::InvalidVerification(self.name.to_string(),
+                                           err.to_string()).into())
     }
 
-    fn load_range(&mut self, range: usize) -> Result<Vec<u8>, String> {
+    fn load_range(&mut self, range: usize) -> Result<Vec<u8>> {
         let v: Vec<u8> = self.input.by_ref().take(range).collect();
         self.assert_verification(v.len() == range,
                                  format!("Not enough bytes: {}", range))?;
@@ -111,7 +130,7 @@ impl LoadState {
         */
     }
 
-    fn load<T: Copy + Primitives>(&mut self) -> Result<T, String> {
+    fn load<T: Copy + Primitives>(&mut self) -> Result<T> {
         /*
          * Safety of this method
          * ---
@@ -132,7 +151,7 @@ impl LoadState {
         Ok(unsafe { *(&bytes[0] as *const u8 as *const T) })
     }
 
-    fn load_string(&mut self) -> Result<SyxString, String> {
+    fn load_string(&mut self) -> Result<SyxString> {
         let mut size: usize = self.load::<u8>()? as usize;
         if size == 0xFF {
             size = self.load::<usize>()?;
@@ -155,7 +174,7 @@ impl LoadState {
         }
     }
 
-    fn load_constants(&mut self, proto: &mut Proto) -> SyxResult {
+    fn load_constants(&mut self, proto: &mut Proto) -> Result<()> {
         let constant_count: isize = self.load::<i32>()? as isize;
         proto.constants.clear();
         for _ in 0..constant_count {
@@ -170,14 +189,14 @@ impl LoadState {
                 | SyxType::TSHRSTR
                 | SyxType::TLNGSTR => SyxValue::String(self.load_string()?),
                 x => {
-                    return Err(format!("bad value for constant: {:?}", x));
+                    return Err(ErrorKind::InvalidConstantType(x).into());
                 }
             });
         }
         Ok(())
     }
 
-    fn load_code(&mut self, proto: &mut Proto) -> SyxResult {
+    fn load_code(&mut self, proto: &mut Proto) -> Result<()> {
         let count = self.load::<SyxInt>()?;
         proto.instructions.clear();
         proto.instructions.reserve(count as usize);
@@ -187,7 +206,7 @@ impl LoadState {
         Ok(())
     }
 
-    fn load_protos(&mut self, proto: &mut Proto) -> SyxResult {
+    fn load_protos(&mut self, proto: &mut Proto) -> Result<()> {
         let count = self.load::<SyxInt>()?;
         proto.protos.clear();
         proto.protos.reserve(count as usize);
@@ -199,7 +218,7 @@ impl LoadState {
         Ok(())
     }
 
-    fn load_upvalues(&mut self, proto: &mut Proto) -> SyxResult {
+    fn load_upvalues(&mut self, proto: &mut Proto) -> Result<()> {
         let upvalues_count = self.load::<SyxInt>()?;
         proto.upvalues.clear();
         proto.upvalues.reserve(upvalues_count as usize);
@@ -213,7 +232,7 @@ impl LoadState {
         Ok(())
     }
 
-    fn load_debug(&mut self, proto: &mut Proto) -> SyxResult {
+    fn load_debug(&mut self, proto: &mut Proto) -> Result<()> {
         let lines = self.load::<SyxInt>()? as usize;
         proto.lineinfo.clear();
         proto.lineinfo.reserve(lines);
@@ -236,27 +255,23 @@ impl LoadState {
         for i in 0..upvalue_count {
             match proto.upvalues.get_mut(i) {
                 Some(value) => value.name = self.load_string()?,
-                None => return Err(
-                    format!("could not find upvalue index {}", i)),
+                None => return Err(ErrorKind::InvalidUpvalueIndex(i).into()),
             }
         }
         Ok(())
     }
 
     fn load_function(&mut self, proto: &mut Proto, source: SyxString)
-        -> SyxResult
+        -> Result<()>
     {
         let loaded_source = self.load_string()?;
-        proto.source = match String::from_utf8({
+        proto.source = String::from_utf8({
             if !loaded_source.is_empty() {
                 loaded_source
             } else {
                 source
             }
-        }) {
-            Ok(val) => val,
-            Err(_) => return Err("invalid source name".to_string()),
-        };
+        }).chain_err(|| ErrorKind::InvalidSourceName)?;
         proto.linedefined = self.load::<SyxInt>()?;
         proto.lastlinedefined = self.load::<SyxInt>()?;
         proto.numparams = self.load::<u8>()?;
@@ -270,7 +285,7 @@ impl LoadState {
         Ok(())
     }
 
-    fn check_size(&mut self, size: (usize, &'static str)) -> SyxResult {
+    fn check_size(&mut self, size: (usize, &'static str)) -> Result<()> {
         if let Ok(bytecode_size) = self.load::<u8>() {
             self.assert_verification(
                 bytecode_size == (size.0 as u8),
@@ -285,7 +300,7 @@ impl LoadState {
         &mut self,
         value_impl: impl Into<Vec<u8>>,
         err: impl ::std::fmt::Display,
-    ) -> SyxResult {
+    ) -> Result<()> {
         let value = value_impl.into();
         if let Ok(literal) = self.load_range(value.len()) {
             self.assert_verification(literal == value,
@@ -295,7 +310,7 @@ impl LoadState {
         }
     }
 
-    fn check_header(&mut self) -> SyxResult {
+    fn check_header(&mut self) -> Result<()> {
         self.check_literal(SYX_HEADER, "header")?;
         let bt = self.load::<u8>()?;
         self.assert_verification(bt == SYX_VERSION, "version mismatch")?;
@@ -314,7 +329,7 @@ impl LoadState {
         Ok(())
     }
 
-    fn load_chunk(&mut self, _lstate: state::SyxState) -> Result<Proto, String> {
+    fn load_chunk(&mut self, _lstate: state::SyxState) -> Result<Proto> {
         self.state = Some(state::SyxState {});
         // ::TODO:: ::XXX:: here is where i left off
         // cl->p
