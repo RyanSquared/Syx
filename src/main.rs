@@ -1,3 +1,7 @@
+#[macro_use]
+extern crate error_chain;
+
+mod conf;
 mod limits;
 mod object;
 mod state;
@@ -6,18 +10,29 @@ mod undump;
 use object::SyxValue;
 use std::fs::File;
 
-fn main() -> std::io::Result<()> {
+fn main() {
+    if let Err(e) = run() {
+        use std::io::Write;
+        let stderr = &mut ::std::io::stderr();
+        let errmsg = "failed to write to stdout";
+
+        writeln!(stderr, "error: {}", e).expect(errmsg);
+
+        for e in e.iter().skip(1) {
+            writeln!(stderr, "caused by: {}", e).expect(errmsg);
+        }
+    }
+}
+
+fn run() -> undump::errors::Result<()> {
     let args: Vec<_> = ::std::env::args().collect();
     let main_chunk = match args.get(1) {
         None => {
             panic!("Usage: {} [filename]", args[0]);
         }
         Some(file) => {
-            let handle = File::open(file)?;
-            match undump::LoadState::from_read(handle, file.clone()) {
-                Err(err) => panic!("fail! => {}", err),
-                Ok(main_chunk) => main_chunk,
-            }
+            let handle = File::open(file).unwrap();
+            undump::LoadState::from_read(handle, file.clone())?
         }
     };
     if !main_chunk.constants.is_empty() {
