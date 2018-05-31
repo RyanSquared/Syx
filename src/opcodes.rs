@@ -160,7 +160,6 @@ pub enum Instruction {
 impl Into<Instruction> for object::Instruction {
     fn into(self) -> Instruction {
         let opcode = (self >> (32 - SIZE_OP + 1)) & BITMASK_OP; // OpCode is 6 bits
-        println!("opcode: {} {}", opcode, OFFSET_B);
         let _enum = unsafe { ::std::mem::transmute::<object::Instruction, OpCode>(opcode) };
         match _enum {
             | OpCode::Move     // A B
