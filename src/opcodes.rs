@@ -3,6 +3,20 @@
 
 use super::object;
 
+/* Word Format:
+ * |0bIIIIII_AAAAAAAA_BBBBBBBBB_CCCCCCCCC| -> Instruction, A B C
+ * |0bIIIIII_AAAAAAAA_BBBBBBBBB_BBBBBBBBB| -> Instruction, A Bx
+ * |0bIIIIII_AAAAAAAA_SBBBBBBBB_BBBBBBBBB| -> Instruction, A sBx (same as above)
+ * |0bIIIIII_AAAAAAAA_AAAAAAAAA_AAAAAAAAA| -> Instruction, Ax
+ *
+ * Almost every operation uses A B C unless the argument can take more than
+ * what can be stored in the values, in which case Bx and Ax are used to store
+ * more values than could be used normally. The value sBx is used regardless of
+ * whether the space is needed for B, and the result is a signed integer.
+ *
+ * Consult the versioned lopcodes.h for more information.
+ */
+
 pub mod errors {
     error_chain! {
     }
