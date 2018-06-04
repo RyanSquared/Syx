@@ -19,8 +19,15 @@ use super::object;
 
 pub mod errors {
     error_chain! {
+        errors {
+            InvalidOpCode {
+                display("opcode is not valid"),
+            }
+        }
     }
 }
+
+use self::errors::*;
 
 const SIZE_OP: u32 = 6;
 
@@ -30,7 +37,7 @@ const SIZE_BX: u32 = SIZE_C + SIZE_B;
 const SIZE_A: u32 = 8;
 const SIZE_AX: u32 = SIZE_C + SIZE_B + SIZE_A;
 
-const OFFSET_OP: u32 = (32 - SIZE_OP + 1);
+const OFFSET_OP: u32 = (32 - SIZE_OP);
 const OFFSET_A: u32 = (32 - SIZE_OP - SIZE_A);
 const OFFSET_B: u32 = (32 - SIZE_OP - SIZE_A - SIZE_B);
 const OFFSET_C: u32 = 0;
@@ -42,8 +49,10 @@ const BITMASK_B: u32 = (1 << SIZE_B) - 1;
 const BITMASK_BX: u32 = (1 << SIZE_BX) - 1;
 const BITMASK_C: u32 = (1 << SIZE_C) - 1;
 
+const BITMASK_RK: u32 = 1 << (SIZE_B - 1); // an RK can only be up to SIZE_B-1 bits
+
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum OpCode {
 Move, // A B R(A) := R(B)
 LoadK, // A Bx R(A) := Kst(Bx)
@@ -110,6 +119,15 @@ VarArg, // A B R(A), R(A+1), ..., R(A+B-2) = vararg
 ExtraArg // Ax extra (larger) argument for previous opcode
 }
 
+impl From<u32> for OpCode {
+    fn from(opcode: u32) -> OpCode {
+        if opcode > (OpCode::ExtraArg as u32) {
+            panic!("{}", ErrorKind::InvalidOpCode);
+        }
+        unsafe { ::std::mem::transmute::<object::Instruction, OpCode>(opcode) }
+    }
+}
+
 /*===========================================================================
   Notes:
   (*) In OP_CALL, if (B == 0) then B = top. If (C == 0), then 'top' is
@@ -133,7 +151,7 @@ ExtraArg // Ax extra (larger) argument for previous opcode
 
 ===========================================================================*/
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Instruction {
     ABC {
         instruction: OpCode,
@@ -157,9 +175,11 @@ pub enum Instruction {
     },
 }
 
-impl Into<Instruction> for object::Instruction {
-    fn into(self) -> Instruction {
-        let opcode = (self >> (32 - SIZE_OP + 1)) & BITMASK_OP; // OpCode is 6 bits
+impl From<object::Instruction> for Instruction {
+    fn from(instr: object::Instruction) -> Instruction {
+        // keep the -1 for legacy reasons
+        let opcode = (instr >> OFFSET_OP) & BITMASK_OP - 1;
+        let _enum: OpCode = opcode.into();
         let _enum = unsafe { ::std::mem::transmute::<object::Instruction, OpCode>(opcode) };
         match _enum {
             | OpCode::Move     // A B
@@ -204,16 +224,16 @@ impl Into<Instruction> for object::Instruction {
             | OpCode::VarArg   // A B
             => Instruction::ABC {
                 instruction: _enum,
-                a: ((self >> OFFSET_A) & BITMASK_A) as u8,
-                b: ((self >> OFFSET_B) & BITMASK_B) as u16,
-                c: ((self >> OFFSET_C) & BITMASK_C) as u16,
+                a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
+                b: ((instr >> OFFSET_B) & BITMASK_B) as u16,
+                c: ((instr >> OFFSET_C) & BITMASK_C) as u16,
             },
             | OpCode::LoadK
             | OpCode::Closure
             => Instruction::ABx {
                 instruction: _enum,
-                a: ((self >> OFFSET_A) & BITMASK_A) as u8,
-                bx: ((self >> OFFSET_B) & BITMASK_BX) as u32,
+                a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
+                bx: ((instr >> OFFSET_B) & BITMASK_BX) as u32,
             },
             | OpCode::Jmp
             | OpCode::ForLoop
@@ -221,14 +241,43 @@ impl Into<Instruction> for object::Instruction {
             | OpCode::TForLoop
             => Instruction::AsBx {
                 instruction: _enum,
-                a: ((self >> OFFSET_A) & BITMASK_A) as u8,
-                sbx: ((self >> OFFSET_B) & BITMASK_BX) as i32,
+                a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
+                sbx: ((instr >> OFFSET_B) & BITMASK_BX) as i32,
             },
             | OpCode::ExtraArg
             => Instruction::Ax {
                 instruction: _enum,
-                ax: ((self >> OFFSET_A) & BITMASK_AX) as u32,
+                ax: ((instr >> OFFSET_A) & BITMASK_AX) as u32,
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_abc() {
+        {
+            let instr: Instruction = 0b000001_00000100_000100000_000000000.into();
+            let instr_comp = Instruction::ABC {
+                instruction: OpCode::Move,
+                a: 0b00000100,
+                b: 0b000100000,
+                c: 0b000000000,
+            };
+            assert_eq!(instr, instr_comp);
+        }
+        {
+            let instr: Instruction = 0b000011_10000101_000100100_000000000.into();
+            let instr_comp = Instruction::ABC {
+                instruction: OpCode::LoadKX,
+                a: 0b10000101,
+                b: 0b000100100,
+                c: 0b000000000,
+            };
+            assert_eq!(instr, instr_comp);
         }
     }
 }
