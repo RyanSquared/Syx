@@ -5,3 +5,4 @@ authors = ["RyanSquared <vandor2012@gmail.com>"]
 
 [dependencies]
 error-chain = "0.11.0"
+conv = "0.3.3"

@@ -1,6 +1,9 @@
 // Set up VM instructions
 #![allow(dead_code)]
 
+extern crate conv;
+use self::conv::{TryFrom, TryInto};
+
 use super::object;
 
 /* Word Format:
@@ -116,15 +119,21 @@ Closure, // A Bx R(A) := closure(KPROTO[Bx])
 
 VarArg, // A B R(A), R(A+1), ..., R(A+B-2) = vararg
 
-ExtraArg // Ax extra (larger) argument for previous opcode
+ExtraArg, // Ax extra (larger) argument for previous opcode
+
+LastOpCode // Compare to find if TryFrom below will work
 }
 
-impl From<u32> for OpCode {
-    fn from(opcode: u32) -> OpCode {
-        if opcode > (OpCode::ExtraArg as u32) {
-            panic!("{}", ErrorKind::InvalidOpCode);
+impl TryFrom<u32> for OpCode {
+    type Err = Error;
+
+    fn try_from(opcode: u32) -> Result<OpCode> {
+        if opcode >= (OpCode::LastOpCode as u32) {
+            return Err(ErrorKind::InvalidOpCode.into());
         }
-        unsafe { ::std::mem::transmute::<object::Instruction, OpCode>(opcode) }
+        Ok(unsafe {
+            ::std::mem::transmute::<object::Instruction, OpCode>(opcode)
+        })
     }
 }
 
@@ -175,13 +184,15 @@ pub enum Instruction {
     },
 }
 
-impl From<object::Instruction> for Instruction {
-    fn from(instr: object::Instruction) -> Instruction {
+impl TryFrom<object::Instruction> for Instruction {
+    type Err = Error;
+
+    fn try_from(instr: object::Instruction) -> Result<Instruction> {
         // keep the -1 for legacy reasons
         let opcode = (instr >> OFFSET_OP) & BITMASK_OP - 1;
-        let _enum: OpCode = opcode.into();
+        let _enum: OpCode = OpCode::try_from(opcode)?;
         let _enum = unsafe { ::std::mem::transmute::<object::Instruction, OpCode>(opcode) };
-        match _enum {
+        Ok(match _enum {
             | OpCode::Move     // A B
             | OpCode::LoadKX   // A <extra arg>
             | OpCode::LoadBool // A B C
@@ -249,7 +260,8 @@ impl From<object::Instruction> for Instruction {
                 instruction: _enum,
                 ax: ((instr >> OFFSET_A) & BITMASK_AX) as u32,
             },
-        }
+            | OpCode::LastOpCode => unreachable!()
+        })
     }
 }
 
@@ -260,7 +272,7 @@ mod tests {
     #[test]
     fn test_abc() {
         {
-            let instr: Instruction = 0b000001_00000100_000100000_000000000.into();
+            let instr: Instruction = 0b000001_00000100_000100000_000000000u32.try_into().unwrap();
             let instr_comp = Instruction::ABC {
                 instruction: OpCode::Move,
                 a: 0b00000100,
@@ -270,7 +282,7 @@ mod tests {
             assert_eq!(instr, instr_comp);
         }
         {
-            let instr: Instruction = 0b000011_10000101_000100100_000000000.into();
+            let instr: Instruction = 0b000011_10000101_000100100_000000000u32.try_into().unwrap();
             let instr_comp = Instruction::ABC {
                 instruction: OpCode::LoadKX,
                 a: 0b10000101,

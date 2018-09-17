@@ -2,6 +2,7 @@
 extern crate error_chain;
 
 mod conf;
+mod opcodes;
 mod limits;
 mod object;
 mod state;
