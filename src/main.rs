@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate error_chain;
 
+mod errors;
 mod conf;
 mod opcodes;
 mod limits;
@@ -25,7 +26,7 @@ fn main() {
     }
 }
 
-fn run() -> undump::errors::Result<()> {
+fn run() -> errors::Result<()> {
     let args: Vec<_> = ::std::env::args().collect();
     let main_chunk = match args.get(1) {
         None => {

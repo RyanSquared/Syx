@@ -20,17 +20,7 @@ use super::object;
  * Consult the versioned lopcodes.h for more information.
  */
 
-pub mod errors {
-    error_chain! {
-        errors {
-            InvalidOpCode {
-                display("opcode is not valid"),
-            }
-        }
-    }
-}
-
-use self::errors::*;
+use super::errors::*;
 
 const SIZE_OP: u32 = 6;
 

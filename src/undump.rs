@@ -1,3 +1,6 @@
+extern crate conv;
+use self::conv::{TryFrom, TryInto};
+
 use super::conf::{SYX_HEADER, SYX_DATA, SYX_VERSION, SYX_FORMAT, SYX_INT, SYX_NUM};
 
 use super::object::{
@@ -5,40 +8,7 @@ use super::object::{
     SyxType, SyxValue, Upvalue,
 };
 use super::{limits, state};
-
-pub mod errors {
-    use super::{SyxType};
-
-    error_chain! {
-        errors {
-            BufferNotReadable(t: String) {
-                display("no values read from buffer: {}", t),
-            }
-
-            BufferNotEmpty {
-                display("bytes left over from buffer"),
-            }
-
-            InvalidVerification(name: String, err: String) {
-                display("error verifying {}: {}", name, err)
-            }
-
-            InvalidConstantType(t: SyxType) {
-                display("bad value for constant: {:?}", t)
-            }
-
-            InvalidUpvalueIndex(index: usize) {
-                display("could not find upvalue index: {}", index)
-            }
-
-            InvalidSourceName {
-                display("could not match source name from UTF8")
-            }
-        }
-    }
-}
-
-use self::errors::*;
+use super::errors::*;
 
 pub struct LoadState {
     input: Box<Iterator<Item = u8>>,
@@ -179,7 +149,7 @@ impl LoadState {
         proto.constants.clear();
         for _ in 0..constant_count {
             // get type from byte
-            proto.constants.push(match SyxType::from_u8(self.load::<u8>()?) {
+            proto.constants.push(match SyxType::try_from(self.load::<u8>()?)? {
                 SyxType::TNIL => SyxValue::Nil,
                 SyxType::TBOOLEAN => SyxValue::Bool(self.load::<u8>()? == 1),
                 // these lines represent everything wrong with the world

@@ -1,8 +1,13 @@
+extern crate conv;
+use self::conv::{TryFrom, TryInto};
+
 pub type Instruction = u32;
 pub type SyxInt = i32; // because Lua hates me
 pub type SyxInteger = i64;
 pub type SyxNumber = f64;
 pub type SyxString = Vec<u8>;
+
+use super::errors::*;
 
 #[derive(Debug)]
 pub enum SyxType {
@@ -27,23 +32,25 @@ pub const SYX_TNUMINT: u8 = (SyxType::TNUMBER as u8) | (1 << 4);
 pub const SYX_TSHRSTR: u8 = (SyxType::TSTRING as u8) | (0 << 4);
 pub const SYX_TLNGSTR: u8 = (SyxType::TSTRING as u8) | (1 << 4);
 
-impl SyxType {
-    pub fn from_u8(value: u8) -> SyxType {
+impl TryFrom<u8> for SyxType {
+    type Err = Error;
+
+    fn try_from(value: u8) -> Result<SyxType> {
         match value {
-            SYX_TNUMFLT => SyxType::TNUMFLT,
-            SYX_TNUMINT => SyxType::TNUMINT,
-            SYX_TSHRSTR => SyxType::TSHRSTR,
-            SYX_TLNGSTR => SyxType::TLNGSTR,
-            0 => SyxType::TNIL,
-            1 => SyxType::TBOOLEAN,
-            2 => SyxType::TLIGHTUSERDATA,
-            // 3 => SyxType::TNUMBER,
-            // 4 => SyxType::TSTRING,
-            5 => SyxType::TTABLE,
-            6 => SyxType::TFUNCTION,
-            7 => SyxType::TUSERDATA,
-            8 => SyxType::TTHREAD,
-            _ => panic!("invalid parameter passed to from_u8({})", value),
+            SYX_TNUMFLT => Ok(SyxType::TNUMFLT),
+            SYX_TNUMINT => Ok(SyxType::TNUMINT),
+            SYX_TSHRSTR => Ok(SyxType::TSHRSTR),
+            SYX_TLNGSTR => Ok(SyxType::TLNGSTR),
+            0 => Ok(SyxType::TNIL),
+            1 => Ok(SyxType::TBOOLEAN),
+            2 => Ok(SyxType::TLIGHTUSERDATA),
+            // 3 => Ok(SyxType::TNUMBER),
+            // 4 => Ok(SyxType::TSTRING),
+            5 => Ok(SyxType::TTABLE),
+            6 => Ok(SyxType::TFUNCTION),
+            7 => Ok(SyxType::TUSERDATA),
+            8 => Ok(SyxType::TTHREAD),
+            _ => Err(ErrorKind::InvalidType(value).into()),
         }
     }
 }
