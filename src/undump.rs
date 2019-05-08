@@ -1,12 +1,12 @@
-extern crate conv;
-use self::conv::{TryFrom, TryInto};
+use std::convert::{TryFrom, TryInto};
 
 use super::conf::{SYX_HEADER, SYX_DATA, SYX_VERSION, SYX_FORMAT, SYX_INT, SYX_NUM};
 
 use super::object::{
-    Instruction, LocVar, Proto, SyxInt, SyxInteger, SyxNumber, SyxString,
-    SyxType, SyxValue, Upvalue,
+    LocVar, Proto, SyxInt, SyxInteger, SyxNumber, SyxString,
+    SyxType, SyxValue, Upvalue
 };
+use super::opcodes::{Instruction, Word};
 use super::{limits, state};
 use super::errors::*;
 
@@ -171,7 +171,7 @@ impl LoadState {
         proto.instructions.clear();
         proto.instructions.reserve(count as usize);
         for _ in 0..(count) {
-            proto.instructions.push(self.load::<Instruction>()?);
+            proto.instructions.push(self.load::<Word>()?.try_into()?);
         }
         Ok(())
     }
@@ -289,7 +289,7 @@ impl LoadState {
         self.check_literal(SYX_DATA, "load order verification")?;
         self.check_size(expand!(i32))?;
         self.check_size(expand!(usize))?;
-        self.check_size(expand!(Instruction))?;
+        self.check_size(expand!(Word))?;
         self.check_size(expand!(SyxInteger))?;
         self.check_size(expand!(SyxNumber))?;
         let int: SyxInteger = self.load::<SyxInteger>()?;

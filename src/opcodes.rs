@@ -1,16 +1,19 @@
 // Set up VM instructions
 #![allow(dead_code)]
 
-extern crate conv;
-use self::conv::{TryFrom, TryInto};
+use std::convert::{TryFrom, TryInto};
 
 use super::object;
 
+pub type Word = u32;
+
 /* Word Format:
- * |0bIIIIII_AAAAAAAA_BBBBBBBBB_CCCCCCCCC| -> Instruction, A B C
- * |0bIIIIII_AAAAAAAA_BBBBBBBBB_BBBBBBBBB| -> Instruction, A Bx
- * |0bIIIIII_AAAAAAAA_SBBBBBBBB_BBBBBBBBB| -> Instruction, A sBx (same as above)
- * |0bIIIIII_AAAAAAAA_AAAAAAAAA_AAAAAAAAA| -> Instruction, Ax
+ * |0bBBBBBBBBB_CCCCCCCCC_AAAAAAAA_IIIIII| -> B, C, A, Instruction
+ * |0bBBBBBBBBB_BBBBBBBBB_AAAAAAAA_IIIIII| -> Bx, A, Instruction
+ * |0bSBBBBBBBB_BBBBBBBBB_AAAAAAAA_IIIIII| -> sBx, A, Instruction
+ * |0bAAAAAAAAA_AAAAAAAAA_AAAAAAAA_IIIIII| -> Ax, Instruction
+ *
+ * Bits are "right side lowest, left side highest"
  *
  * Almost every operation uses A B C unless the argument can take more than
  * what can be stored in the values, in which case Bx and Ax are used to store
@@ -22,6 +25,9 @@ use super::object;
 
 use super::errors::*;
 
+#[macro_use]
+use super::try_from_enum;
+
 const SIZE_OP: u32 = 6;
 
 const SIZE_C: u32 = 9;
@@ -30,10 +36,13 @@ const SIZE_BX: u32 = SIZE_C + SIZE_B;
 const SIZE_A: u32 = 8;
 const SIZE_AX: u32 = SIZE_C + SIZE_B + SIZE_A;
 
-const OFFSET_OP: u32 = (32 - SIZE_OP);
-const OFFSET_A: u32 = (32 - SIZE_OP - SIZE_A);
-const OFFSET_B: u32 = (32 - SIZE_OP - SIZE_A - SIZE_B);
-const OFFSET_C: u32 = 0;
+const OFFSET_OP: u32 = 0;
+const OFFSET_A: u32 = (OFFSET_OP + SIZE_OP);
+const OFFSET_C: u32 = (OFFSET_A + SIZE_A);
+const OFFSET_B: u32 = (OFFSET_C + SIZE_C);
+
+const OFFSET_BX: u32 = OFFSET_C;
+const OFFSET_AX: u32 = OFFSET_A;
 
 const BITMASK_OP: u32 = (1 << SIZE_OP) - 1;
 const BITMASK_A: u32 = (1 << SIZE_A) - 1;
@@ -42,89 +51,75 @@ const BITMASK_B: u32 = (1 << SIZE_B) - 1;
 const BITMASK_BX: u32 = (1 << SIZE_BX) - 1;
 const BITMASK_C: u32 = (1 << SIZE_C) - 1;
 
-const BITMASK_RK: u32 = 1 << (SIZE_B - 1); // an RK can only be up to SIZE_B-1 bits
+const BITMASK_IS_RK: u32 = 1 << (SIZE_B - 1); // match significant bit in B
 
-#[repr(C)]
-#[derive(Debug, PartialEq)]
-pub enum OpCode {
-Move, // A B R(A) := R(B)
-LoadK, // A Bx R(A) := Kst(Bx)
-LoadKX, // A  R(A) := Kst(extra arg)
-LoadBool, // A B C R(A) := (Bool)B; if (C) pc++
-LoadNil, // A B R(A), R(A+1), ..., R(A+B) := nil
+// Is constant: C & BITMASK_IS_RK == 1
+// Register number: (n as u32) & ~BITMASK_IS_RK
 
-GetUpval, // A B R(A) := UpValue[B]
-GetTabUp, // A B C R(A) := UpValue[B][RK(C)]
-GetTable, // A B C R(A) := R(B)[RK(C)]
+try_from_enum! { OpCode | Error = ErrorKind::InvalidOpCode.into() =>
+Move = 0, // A B R(A) := R(B)
+LoadK = 1, // A Bx R(A) := Kst(Bx)
+LoadKX = 2, // A  R(A) := Kst(extra arg)
+LoadBool = 3, // A B C R(A) := (Bool)B; if (C) pc++
+LoadNil = 4, // A B R(A), R(A+1), ..., R(A+B) := nil
 
-SetTabUp, // A B C UpValue[A][RK(B)] := RK(C)
-SetUpval, // A B UpValue[B] := R(A)
-SetTable, // A B C R(A)[RK(B)] := RK(C)
+GetUpval = 5, // A B R(A) := UpValue[B]
+GetTabUp = 6, // A B C R(A) := UpValue[B][RK(C)]
+GetTable = 7, // A B C R(A) := R(B)[RK(C)]
 
-NewTable, // A B C R(A) := {} (size = B,C)
+SetTabUp = 8, // A B C UpValue[A][RK(B)] := RK(C)
+SetUpval = 9, // A B UpValue[B] := R(A)
+SetTable = 10, // A B C R(A)[RK(B)] := RK(C)
+
+NewTable = 11, // A B C R(A) := {} (size = B,C)
 
 // OP_SELF
-SelfLoad, // A B C R(A+1) := R(B); R(A) := R(B)[RK(C)]
+SelfLoad = 12, // A B C R(A+1) := R(B); R(A) := R(B)[RK(C)]
 
-Add, // A B C R(A) := RK(B) + RK(C)
-Sub, // A B C R(A) := RK(B) - RK(C)
-Mul, // A B C R(A) := RK(B) * RK(C)
-Mod, // A B C R(A) := RK(B) % RK(C)
-Pow, // A B C R(A) := RK(B) ^ RK(C)
-Div, // A B C R(A) := RK(B) / RK(C)
-IDiv, // A B C R(A) := RK(B) // RK(C)
-BAnd, // A B C R(A) := RK(B) & RK(C)
-BOr, // A B C R(A) := RK(B) | RK(C)
-BXOr, // A B C R(A) := RK(B) ~ RK(C)
-Shl, // A B C R(A) := RK(B) << RK(C)
-Shr, // A B C R(A) := RK(B) >> RK(C)
-Unm, // A B R(A) := -R(B)
-BNot, // A B R(A) := ~R(B)
-Not, // A B R(A) := not R(B)
-Len, // A B R(A) := length of R(B)
+Add = 13, // A B C R(A) := RK(B) + RK(C)
+Sub = 14, // A B C R(A) := RK(B) - RK(C)
+Mul = 15, // A B C R(A) := RK(B) * RK(C)
+Mod = 16, // A B C R(A) := RK(B) % RK(C)
+Pow = 17, // A B C R(A) := RK(B) ^ RK(C)
+Div = 18, // A B C R(A) := RK(B) / RK(C)
+IDiv = 19, // A B C R(A) := RK(B) // RK(C)
+BAnd = 20, // A B C R(A) := RK(B) & RK(C)
+BOr = 21, // A B C R(A) := RK(B) | RK(C)
+BXOr = 22, // A B C R(A) := RK(B) ~ RK(C)
+Shl = 23, // A B C R(A) := RK(B) << RK(C)
+Shr = 24, // A B C R(A) := RK(B) >> RK(C)
+Unm = 25, // A B R(A) := -R(B)
+BNot = 26, // A B R(A) := ~R(B)
+Not = 27, // A B R(A) := not R(B)
+Len = 28, // A B R(A) := length of R(B)
 
-Concat, // A B C R(A) := R(B).. ... ..R(C)
+Concat = 29, // A B C R(A) := R(B).. ... ..R(C)
 
-Jmp, // A sBx pc+=sBx; if (A) close all upvalues >= R(A - 1)
-Eq, // A B C if ((RK(B) == RK(C)) ~= A) then pc++
-Lt, // A B C if ((RK(B) <  RK(C)) ~= A) then pc++
-Le, // A B C if ((RK(B) <= RK(C)) ~= A) then pc++
+Jmp = 30, // A sBx pc+=sBx; if (A) close all upvalues >= R(A - 1)
+Eq = 31, // A B C if ((RK(B) == RK(C)) ~= A) then pc++
+Lt = 32, // A B C if ((RK(B) <  RK(C)) ~= A) then pc++
+Le = 33, // A B C if ((RK(B) <= RK(C)) ~= A) then pc++
 
-Test, // A C if not (R(A) <=> C) then pc++
-TestSet, // A B C if (R(B) <=> C) then R(A) := R(B) else pc++
+Test = 34, // A C if not (R(A) <=> C) then pc++
+TestSet = 35, // A B C if (R(B) <=> C) then R(A) := R(B) else pc++
 
-Call, // A B C R(A), ... ,R(A+C-2) := R(A)(R(A+1), ... ,R(A+B-1))
-TailCall, // A B C return R(A)(R(A+1), ... ,R(A+B-1))
-Return, // A B return R(A), ... ,R(A+B-2) (see note)
+Call = 36, // A B C R(A), ... ,R(A+C-2) := R(A)(R(A+1), ... ,R(A+B-1))
+TailCall = 37, // A B C return R(A)(R(A+1), ... ,R(A+B-1))
+Return = 38, // A B return R(A), ... ,R(A+B-2) (see note)
 
-ForLoop, // A sBx R(A)+=R(A+2); if R(A) <?= R(A+1) then { pc+=sBx; R(A+3)=R(A) }
-ForPrep, // A sBx R(A)-=R(A+2); pc+=sBx
+ForLoop = 39, // A sBx R(A)+=R(A+2); if R(A) <?= R(A+1) then { pc+=sBx; R(A+3)=R(A) }
+ForPrep = 40, // A sBx R(A)-=R(A+2); pc+=sBx
 
-TForCall, // A C R(A+3), ... ,R(A+2+C) := R(A)(R(A+1), R(A+2));
-TForLoop, // A sBx if R(A+1) ~= nil then { R(A)=R(A+1); pc += sBx }
+TForCall = 41, // A C R(A+3), ... ,R(A+2+C) := R(A)(R(A+1), R(A+2));
+TForLoop = 42, // A sBx if R(A+1) ~= nil then { R(A)=R(A+1); pc += sBx }
 
-SetList, // A B C R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B
+SetList = 43, // A B C R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B
 
-Closure, // A Bx R(A) := closure(KPROTO[Bx])
+Closure = 44, // A Bx R(A) := closure(KPROTO[Bx])
 
-VarArg, // A B R(A), R(A+1), ..., R(A+B-2) = vararg
+VarArg = 45, // A B R(A), R(A+1), ..., R(A+B-2) = vararg
 
-ExtraArg, // Ax extra (larger) argument for previous opcode
-
-LastOpCode // Compare to find if TryFrom below will work
-}
-
-impl TryFrom<u32> for OpCode {
-    type Err = Error;
-
-    fn try_from(opcode: u32) -> Result<OpCode> {
-        if opcode >= (OpCode::LastOpCode as u32) {
-            return Err(ErrorKind::InvalidOpCode.into());
-        }
-        Ok(unsafe {
-            ::std::mem::transmute::<object::Instruction, OpCode>(opcode)
-        })
-    }
+ExtraArg = 46 // Ax extra (larger) argument for previous opcode
 }
 
 /*===========================================================================
@@ -174,14 +169,12 @@ pub enum Instruction {
     },
 }
 
-impl TryFrom<object::Instruction> for Instruction {
-    type Err = Error;
+impl TryFrom<Word> for Instruction {
+    type Error = Error;
 
-    fn try_from(instr: object::Instruction) -> Result<Instruction> {
-        // keep the -1 for legacy reasons
-        let opcode = (instr >> OFFSET_OP) & BITMASK_OP - 1;
-        let _enum: OpCode = OpCode::try_from(opcode)?;
-        let _enum = unsafe { ::std::mem::transmute::<object::Instruction, OpCode>(opcode) };
+    fn try_from(instr: Word) -> Result<Instruction> {
+        let opcode = (instr >> OFFSET_OP) & BITMASK_OP;
+        let _enum: OpCode = OpCode::try_from(opcode as u8)?;
         Ok(match _enum {
             | OpCode::Move     // A B
             | OpCode::LoadKX   // A <extra arg>
@@ -249,8 +242,7 @@ impl TryFrom<object::Instruction> for Instruction {
             => Instruction::Ax {
                 instruction: _enum,
                 ax: ((instr >> OFFSET_A) & BITMASK_AX) as u32,
-            },
-            | OpCode::LastOpCode => unreachable!()
+            }
         })
     }
 }
@@ -259,10 +251,16 @@ impl TryFrom<object::Instruction> for Instruction {
 mod tests {
     use super::*;
 
+    /*
+     * Tests are written in the format "test_<format>"
+     * format refers to the layout of the items used. for instance,
+     * bcai uses the "b, c, a, i" layout, which is the "standard" opcode.
+     */
+
     #[test]
-    fn test_abc() {
+    fn test_bcai() {
         {
-            let instr: Instruction = 0b000001_00000100_000100000_000000000u32.try_into().unwrap();
+            let instr: Instruction = 0b000100000_000000000_00000100_000000u32.try_into().unwrap();
             let instr_comp = Instruction::ABC {
                 instruction: OpCode::Move,
                 a: 0b00000100,
@@ -272,7 +270,7 @@ mod tests {
             assert_eq!(instr, instr_comp);
         }
         {
-            let instr: Instruction = 0b000011_10000101_000100100_000000000u32.try_into().unwrap();
+            let instr: Instruction = 0b000100100_000000000_10000101_000010u32.try_into().unwrap();
             let instr_comp = Instruction::ABC {
                 instruction: OpCode::LoadKX,
                 a: 0b10000101,

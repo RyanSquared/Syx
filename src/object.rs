@@ -1,13 +1,11 @@
-extern crate conv;
-use self::conv::{TryFrom, TryInto};
+use super::errors::*;
 
-pub type Instruction = u32;
+use super::opcodes::{Instruction, Word};
+
 pub type SyxInt = i32; // because Lua hates me
 pub type SyxInteger = i64;
 pub type SyxNumber = f64;
 pub type SyxString = Vec<u8>;
-
-use super::errors::*;
 
 #[derive(Debug)]
 pub enum SyxType {
@@ -32,8 +30,8 @@ pub const SYX_TNUMINT: u8 = (SyxType::TNUMBER as u8) | (1 << 4);
 pub const SYX_TSHRSTR: u8 = (SyxType::TSTRING as u8) | (0 << 4);
 pub const SYX_TLNGSTR: u8 = (SyxType::TSTRING as u8) | (1 << 4);
 
-impl TryFrom<u8> for SyxType {
-    type Err = Error;
+impl std::convert::TryFrom<u8> for SyxType {
+    type Error = Error;
 
     fn try_from(value: u8) -> Result<SyxType> {
         match value {

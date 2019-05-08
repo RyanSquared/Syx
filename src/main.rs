@@ -9,6 +9,9 @@ mod object;
 mod state;
 mod undump;
 
+#[macro_use]
+mod macros;
+
 use object::SyxValue;
 use std::fs::File;
 
@@ -30,6 +33,7 @@ fn run() -> errors::Result<()> {
     let args: Vec<_> = ::std::env::args().collect();
     let main_chunk = match args.get(1) {
         None => {
+            println!("test");
             panic!("Usage: {} [filename]", args[0]);
         }
         Some(file) => {
@@ -77,6 +81,13 @@ fn run() -> errors::Result<()> {
             } else if let Ok(string) = String::from_utf8(upval.name) {
                 println!("{} [{}, {}]", string, upval.instack, upval.idx);
             }
+        }
+    }
+    if !main_chunk.instructions.is_empty() {
+        println!();
+        println!("instructions:");
+        for instr in main_chunk.instructions {
+            println!("{:?}", instr);
         }
     }
     Ok(())
