@@ -4,7 +4,6 @@ macro_rules! try_from_enum {
         $name:ident | $err:ident = $error_value:expr =>
         $($variant:ident = $value:expr),+
     )=> {
-        #[repr(C)]
         #[derive(Debug, PartialEq)]
         pub enum $name {
         $(

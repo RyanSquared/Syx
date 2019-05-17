@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate error_chain;
 
+extern crate syx_codegen;
+
 mod errors;
 mod conf;
 mod opcodes;

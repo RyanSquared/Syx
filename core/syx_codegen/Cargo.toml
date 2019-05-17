@@ -1,0 +1,12 @@
+[package]
+name = "syx_codegen"
+version = "0.1.0"
+authors = ["RyanSquared <vandor2012@gmail.com>"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "0.6"
+syn = "0.15"
+proc-macro2 = "0.4"

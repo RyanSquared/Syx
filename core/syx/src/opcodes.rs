@@ -1,6 +1,9 @@
 // Set up VM instructions
 #![allow(dead_code)]
 
+#[macro_use]
+use syx_codegen::bytecode;
+
 use std::convert::{TryFrom, TryInto};
 
 use super::object;
@@ -28,98 +31,81 @@ use super::errors::*;
 #[macro_use]
 use super::try_from_enum;
 
-const SIZE_OP: u32 = 6;
+bytecode! { OpCode | Error = ErrorKind::InvalidOpCode.into() =>
+    Move: AB = Register, Register; // R(A) := R(B)
+    LoadK: ABx = Register, Constant; // R(A) = Kst(Bx)
+    LoadKX: A = Register; // R(A) = Kst(extra arg); see ExtraArg
+    LoadBool: ABC = Register, Bool, Integer; // R(A) := (Bool)B; if C pc++
+    LoadNil: AB = Register, Integer; // R(A .. A+B) := nil
 
-const SIZE_C: u32 = 9;
-const SIZE_B: u32 = 9;
-const SIZE_BX: u32 = SIZE_C + SIZE_B;
-const SIZE_A: u32 = 8;
-const SIZE_AX: u32 = SIZE_C + SIZE_B + SIZE_A;
+    GetUpval: AB = Register, UpValue; // R(A) = UpValue[B]
+    GetTabUp: ABC = Register, UpValue, RegisterConstant; // R(A) := UpValue[B][RK(C)]
+    GetTable: ABC = Register, Register, RegisterConstant; // R(A) := R(B)[RK(C)]
 
-const OFFSET_OP: u32 = 0;
-const OFFSET_A: u32 = (OFFSET_OP + SIZE_OP);
-const OFFSET_C: u32 = (OFFSET_A + SIZE_A);
-const OFFSET_B: u32 = (OFFSET_C + SIZE_C);
+    SetTabUp: ABC = UpValue, RegisterConstant, RegisterConstant; // UpValue[A][RK(B)] = RK(C)
+    SetUpval: AB = UpValue, Register; // UpValue[B] := R(A)
+    SetTable: ABC = Register, RegisterConstant, RegisterConstant; // R(A)[RK(B)] := RK(C)
 
-const OFFSET_BX: u32 = OFFSET_C;
-const OFFSET_AX: u32 = OFFSET_A;
+    NewTable: ABC = Register, Integer, Integer; // R(A) := {} (size: array = B, hash = C)
 
-const BITMASK_OP: u32 = (1 << SIZE_OP) - 1;
-const BITMASK_A: u32 = (1 << SIZE_A) - 1;
-const BITMASK_AX: u32 = (1 << SIZE_AX) - 1;
-const BITMASK_B: u32 = (1 << SIZE_B) - 1;
-const BITMASK_BX: u32 = (1 << SIZE_BX) - 1;
-const BITMASK_C: u32 = (1 << SIZE_C) - 1;
+    // OP_SELF
+    // move the table to the next item of the registers, assign A to the "method"
+    SelfLoad: ABC = Register, Register, RegisterConstant; // R(A+1) := R(B); R(A) = R(B)[RK(C)]
 
-const BITMASK_IS_RK: u32 = 1 << (SIZE_B - 1); // match significant bit in B
+    Add: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) + RK(C)
+    Sub: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) - RK(C)
+    Mul: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) * RK(C)
+    Mod: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) % RK(C)
+    Pow: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) ^ RK(C)
+    Div: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) / RK(C)
+    IDiv: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) // RK(C)
+    BAnd: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) & RK(C)
+    BOr: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) | RK(C)
+    BXOr: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) ~ RK(C)
+    Shl: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) << RK(C)
+    Shr: ABC = Register, RegisterConstant, RegisterConstant; // R(A) = RK(B) >> RK(C)
+    Unm: AB = Register, RegisterConstant; // R(A) = RK(B)  RK(C)
+    BNot: AB = Register, RegisterConstant; // R(A) = RK(B) + RK(C)
+    Not: AB = Register, RegisterConstant; // R(A) = RK(B) + RK(C)
+    Len: AB = Register, RegisterConstant; // R(A) = RK(B) + RK(C)
 
-// Is constant: C & BITMASK_IS_RK == 1
-// Register number: (n as u32) & ~BITMASK_IS_RK
+    Concat: ABC = Register, Register, Register; // R(A) := R(B).. ... ..R(C)
 
-try_from_enum! { OpCode | Error = ErrorKind::InvalidOpCode.into() =>
-Move = 0, // A B R(A) := R(B)
-LoadK = 1, // A Bx R(A) := Kst(Bx)
-LoadKX = 2, // A  R(A) := Kst(extra arg)
-LoadBool = 3, // A B C R(A) := (Bool)B; if (C) pc++
-LoadNil = 4, // A B R(A), R(A+1), ..., R(A+B) := nil
+    Jmp: AsBx = Integer, SInteger; // pc += sBx; if A != 0 close upvalues >= R(A - 1)
+    Eq: ABC = Integer, RegisterConstant, RegisterConstant; // if ((RK(B) == RK(C)) ~= A) pc++
+    Lt: ABC = Integer, RegisterConstant, RegisterConstant; // if ((RK(B) <  RK(C)) ~= A) pc++
+    Le: ABC = Integer, RegisterConstant, RegisterConstant; // if ((RK(B) <= RK(C)) ~= A) pc++
 
-GetUpval = 5, // A B R(A) := UpValue[B]
-GetTabUp = 6, // A B C R(A) := UpValue[B][RK(C)]
-GetTable = 7, // A B C R(A) := R(B)[RK(C)]
+    Test: ABC = Register, Register, Integer; // if !(R(A) != C) pc++
+    TestSet: ABC = Register, Register, Integer; // !(R(B) != C) ? (R(A) := R(B)) : pc++
 
-SetTabUp = 8, // A B C UpValue[A][RK(B)] := RK(C)
-SetUpval = 9, // A B UpValue[B] := R(A)
-SetTable = 10, // A B C R(A)[RK(B)] := RK(C)
+    // R(A), ... R(A+C-2) := R(A)(R(A+1), ..., R(A+B-1))
+    // Set register A through A+C-2 to return values of calling A with the
+    // values of A+1 until A+b-1
+    Call: ABC = Register, Integer, Integer; 
+    // return R(A)(R(A+1), ..., R(A+B-1))
+    // Call the function A with values A+1 until A+B-1, and leave the return
+    // values on top of the stack(?)
+    // ::TODO:: is C used?
+    TailCall: ABC = Register, Integer, Integer;
+    Return: AB = Register, Integer; // return R(A), ... ,R(A+B-2) (see note)
 
-NewTable = 11, // A B C R(A) := {} (size = B,C)
+    ForLoop: AsBx = Register, SInteger; // R(A)+=R(A+2); if R(A) <?= R(A+1) { pc += sBx; R(A+3)=R(A) }
+    ForPrep: AsBx = Register, SInteger; // R(A)-=R(A+2); pc += sBx
 
-// OP_SELF
-SelfLoad = 12, // A B C R(A+1) := R(B); R(A) := R(B)[RK(C)]
+    // set register A+3 through A+2+C to return values of call R(A) for R(A+1) and R(A+2)
+    // i think this means you can only have two arguments to an iterator?
+    TForCall: ABC = Register, Integer, Integer; // R(A+3), ... ,R(A+2+C) := R(A)(R(A+1), R(A+2))
+    TForLoop: AsBx = Register, SInteger; // if R(A+1) ~= nil then { R(A)=R(A+!); pc += sBx }
 
-Add = 13, // A B C R(A) := RK(B) + RK(C)
-Sub = 14, // A B C R(A) := RK(B) - RK(C)
-Mul = 15, // A B C R(A) := RK(B) * RK(C)
-Mod = 16, // A B C R(A) := RK(B) % RK(C)
-Pow = 17, // A B C R(A) := RK(B) ^ RK(C)
-Div = 18, // A B C R(A) := RK(B) / RK(C)
-IDiv = 19, // A B C R(A) := RK(B) // RK(C)
-BAnd = 20, // A B C R(A) := RK(B) & RK(C)
-BOr = 21, // A B C R(A) := RK(B) | RK(C)
-BXOr = 22, // A B C R(A) := RK(B) ~ RK(C)
-Shl = 23, // A B C R(A) := RK(B) << RK(C)
-Shr = 24, // A B C R(A) := RK(B) >> RK(C)
-Unm = 25, // A B R(A) := -R(B)
-BNot = 26, // A B R(A) := ~R(B)
-Not = 27, // A B R(A) := not R(B)
-Len = 28, // A B R(A) := length of R(B)
+    // ::TODO:: ask mailing list, what is this??
+    SetList: ABC = Register, Integer, Integer; // R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B
 
-Concat = 29, // A B C R(A) := R(B).. ... ..R(C)
+    Closure: ABx = Register, Integer; // R(A) := closure(prototypes[Bx])
+    
+    VarArg: AB = Register, Integer; // R(A+1), ..., R(A+B-2) = vararg
 
-Jmp = 30, // A sBx pc+=sBx; if (A) close all upvalues >= R(A - 1)
-Eq = 31, // A B C if ((RK(B) == RK(C)) ~= A) then pc++
-Lt = 32, // A B C if ((RK(B) <  RK(C)) ~= A) then pc++
-Le = 33, // A B C if ((RK(B) <= RK(C)) ~= A) then pc++
-
-Test = 34, // A C if not (R(A) <=> C) then pc++
-TestSet = 35, // A B C if (R(B) <=> C) then R(A) := R(B) else pc++
-
-Call = 36, // A B C R(A), ... ,R(A+C-2) := R(A)(R(A+1), ... ,R(A+B-1))
-TailCall = 37, // A B C return R(A)(R(A+1), ... ,R(A+B-1))
-Return = 38, // A B return R(A), ... ,R(A+B-2) (see note)
-
-ForLoop = 39, // A sBx R(A)+=R(A+2); if R(A) <?= R(A+1) then { pc+=sBx; R(A+3)=R(A) }
-ForPrep = 40, // A sBx R(A)-=R(A+2); pc+=sBx
-
-TForCall = 41, // A C R(A+3), ... ,R(A+2+C) := R(A)(R(A+1), R(A+2));
-TForLoop = 42, // A sBx if R(A+1) ~= nil then { R(A)=R(A+1); pc += sBx }
-
-SetList = 43, // A B C R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B
-
-Closure = 44, // A Bx R(A) := closure(KPROTO[Bx])
-
-VarArg = 45, // A B R(A), R(A+1), ..., R(A+B-2) = vararg
-
-ExtraArg = 46 // Ax extra (larger) argument for previous opcode
+    ExtraArg: Ax = Integer; // ExtraArg = Ax
 }
 
 /*===========================================================================
@@ -224,10 +210,12 @@ impl TryFrom<Word> for Instruction {
             },
             | OpCode::LoadK
             | OpCode::Closure
-            => Instruction::ABx {
-                instruction: _enum,
-                a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
-                bx: ((instr >> OFFSET_B) & BITMASK_BX) as u32,
+            => {
+                Instruction::ABx {
+                    instruction: _enum,
+                    a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
+                    bx: ((instr >> OFFSET_BX) & BITMASK_BX) as u32,
+                }
             },
             | OpCode::Jmp
             | OpCode::ForLoop
@@ -236,7 +224,7 @@ impl TryFrom<Word> for Instruction {
             => Instruction::AsBx {
                 instruction: _enum,
                 a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
-                sbx: ((instr >> OFFSET_B) & BITMASK_BX) as i32,
+                sbx: ((instr >> OFFSET_BX) & BITMASK_BX) as i32,
             },
             | OpCode::ExtraArg
             => Instruction::Ax {
@@ -276,6 +264,20 @@ mod tests {
                 a: 0b10000101,
                 b: 0b000100100,
                 c: 0b000000000,
+            };
+            assert_eq!(instr, instr_comp);
+        }
+    }
+
+    #[test]
+    fn test_bxai() {
+        {
+            println!("{}", OFFSET_BX);
+            let instr: Instruction = 0b000000000000000001_10000101_000001u32.try_into().unwrap();
+            let instr_comp = Instruction::ABx {
+                instruction: OpCode::LoadK,
+                a: 0b10000101,
+                bx: 0b000000000000000001,
             };
             assert_eq!(instr, instr_comp);
         }
