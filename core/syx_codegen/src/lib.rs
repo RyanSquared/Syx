@@ -13,6 +13,7 @@ use syn::export::Span;
 extern crate quote;
 use quote::quote;
 
+#[derive(Clone)]
 enum OpCodeType {
     ABC(Ident, Ident, Ident),
     AB(Ident, Ident),
@@ -22,13 +23,25 @@ enum OpCodeType {
     Ax(Ident),
 }
 
+#[derive(Clone)]
 struct OpCodeContainer(Ident, OpCodeType);
 
 struct OpCodeParse {
-    opcode_name: Ident,
-    error_name: Ident,
-    error_expr: Expr,
-    list: Vec<OpCodeContainer>
+    instruction_name: Ident, // Name of Instruction type
+    opcode_name: Ident, // Name of the OpCode variants, usually OpCodes
+    error_name: Ident, // Name of the error type to use
+    error_expr: Expr, // Name of the expression used to generate errors
+
+    // Containers used for matching
+    abc: Vec<Ident>,
+    ab: Vec<Ident>,
+    a: Vec<Ident>,
+    abx: Vec<Ident>,
+    asbx: Vec<Ident>,
+    ax: Vec<Ident>,
+
+    // Containers used for TryFrom
+    list: Vec<OpCodeContainer>,
 }
 
 const INVALID_FORMAT: &str = "expected one of `ABC`, `AB`, `A`, `ABx`, `AsBx`, `Ax`";
@@ -41,7 +54,7 @@ macro_rules! bad_count_rhs {
     () => {"expected {} arguments, got {}"}
 }
 
-fn get_arg(args: &mut IntoIter<Ident, Token![,]>, count: usize, max: u8, error_span: Span)
+fn get_arg(args: &mut IntoIter<Ident>, count: usize, max: u8, error_span: Span)
         -> syn::parse::Result<Ident> {
     let item = args.next()
         .ok_or(format!(bad_count_rhs!(), count, max))
@@ -54,6 +67,9 @@ fn get_arg(args: &mut IntoIter<Ident, Token![,]>, count: usize, max: u8, error_s
 
 impl Parse for OpCodeParse {
     fn parse(input: ParseStream) -> Result<Self> {
+        // Parse names
+        let instruction_name = input.parse::<Ident>()?;
+        input.parse::<Token![|]>()?;
         let opcode_name = input.parse::<Ident>()?;
         input.parse::<Token![|]>()?;
         let error_name = input.parse::<Ident>()?;
@@ -61,7 +77,18 @@ impl Parse for OpCodeParse {
         let error_expr = input.parse::<Expr>()?;
         input.parse::<Token![=]>()?;
         input.parse::<Token![>]>()?;
+        
+        // Temporary vectors for matching and transforming to structured types
+        let mut abc = Vec::new();
+        let mut ab = Vec::new();
+        let mut a = Vec::new();
+        let mut abx = Vec::new();
+        let mut asbx = Vec::new();
+        let mut ax = Vec::new();
+
         let mut output = Vec::new();
+
+        // Parse opcodes and arguments
         while !input.is_empty() {
             // match something like: `Move: AB = Register, Register`
             // as well as: `MoveK: ABx = Register, Constant`
@@ -76,41 +103,55 @@ impl Parse for OpCodeParse {
             let mut arg_types = arg_types_punct.into_iter();
             let arg_count = arg_types.len();
             let mut expected_arg_count = 0;
+
+            // Match over variant and append OpCodeContainer to output
             match format.to_string().as_str() {
                 "ABC" => {
                     expected_arg_count = 3;
                     let first = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
                     let second = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
                     let third = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
-                    output.push(OpCodeContainer(current_name, OpCodeType::ABC(first, second, third)))
+                    let container = OpCodeContainer(current_name.clone(), OpCodeType::ABC(first, second, third));
+                    abc.push(current_name);
+                    output.push(container)
                 },
                 "AB" => {
                     expected_arg_count = 2;
                     let first = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
                     let second = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
-                    output.push(OpCodeContainer(current_name, OpCodeType::AB(first, second)))
+                    let container = OpCodeContainer(current_name.clone(), OpCodeType::AB(first, second));
+                    ab.push(current_name);
+                    output.push(container)
                 },
                 "A" => {
                     expected_arg_count = 1;
                     let first = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
-                    output.push(OpCodeContainer(current_name, OpCodeType::A(first)))
+                    let container = OpCodeContainer(current_name.clone(), OpCodeType::A(first));
+                    a.push(current_name);
+                    output.push(container)
                 },
                 "ABx" => {
                     expected_arg_count = 2;
                     let first = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
                     let second = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
-                    output.push(OpCodeContainer(current_name, OpCodeType::ABx(first, second)))
+                    let container = OpCodeContainer(current_name.clone(), OpCodeType::ABx(first, second));
+                    abx.push(current_name);
+                    output.push(container)
                 },
                 "AsBx" => {
                     expected_arg_count = 2;
                     let first = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
                     let second = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
-                    output.push(OpCodeContainer(current_name, OpCodeType::AsBx(first, second)))
+                    let container = OpCodeContainer(current_name.clone(), OpCodeType::AsBx(first, second));
+                    asbx.push(current_name);
+                    output.push(container)
                 },
                 "Ax" => {
                     expected_arg_count = 1;
                     let first = get_arg(&mut arg_types, arg_count, expected_arg_count, arg_types_span)?;
-                    output.push(OpCodeContainer(current_name, OpCodeType::Ax(first)))
+                    let container = OpCodeContainer(current_name.clone(), OpCodeType::Ax(first));
+                    ax.push(current_name);
+                    output.push(container)
                 },
                 _ => return Err(Error::new(format.span(), INVALID_FORMAT))
             }
@@ -121,10 +162,17 @@ impl Parse for OpCodeParse {
             input.parse::<Token![;]>()?;
         }
         Ok(OpCodeParse {
+            instruction_name: instruction_name,
             opcode_name: opcode_name,
             error_name: error_name,
             error_expr: error_expr,
-            list: output,
+            abc: abc,
+            ab: ab,
+            a: a,
+            abx: abx,
+            asbx: asbx,
+            ax: ax,
+            list: output
         })
     }
 }
@@ -132,9 +180,16 @@ impl Parse for OpCodeParse {
 #[proc_macro]
 pub fn bytecode(input: TokenStream) -> TokenStream {
     let OpCodeParse {
+        instruction_name: instruction_name,
         opcode_name: opcode_name,
         error_name: error_name,
         error_expr: error_expr,
+        abc: abc,
+        ab: ab,
+        a: a,
+        abx: abx,
+        asbx: asbx,
+        ax: ax,
         list: opcode_list,
     } = parse_macro_input!(input as OpCodeParse);
 
@@ -153,6 +208,8 @@ pub fn bytecode(input: TokenStream) -> TokenStream {
     let opcode_name_repeat = ::std::iter::repeat(opcode_name.clone());
 
     let result = quote! {
+        pub type Word = u32;
+
         const SIZE_OP: u32 = 6;
 
         const SIZE_C: u32 = 9;
@@ -210,6 +267,7 @@ pub fn bytecode(input: TokenStream) -> TokenStream {
             }
         }
 
+        // Generate variants for opcode field names
         #[derive(Debug, Eq, PartialEq)]
         pub enum #opcode_name {
         #(
@@ -217,10 +275,12 @@ pub fn bytecode(input: TokenStream) -> TokenStream {
         )*
         }
 
+        // Generate TryFrom u8 for opcode variants
         impl ::std::convert::TryFrom<u8> for #opcode_name {
             type Error = #error_name;
             fn try_from(value: u8) -> Result<#opcode_name> {
                 match value {
+                // Iterate all variants using opcode variant names, or error
                 #(
                     #number => Ok(#opcode_name_repeat::#opcode_variant_map),
                  )*
@@ -228,6 +288,77 @@ pub fn bytecode(input: TokenStream) -> TokenStream {
                 }
             }
         }
+
+        // Structure to hold bytecode variant types
+        #[derive(Debug, PartialEq)]
+        pub enum #instruction_name {
+            ABC {
+                instruction: #opcode_name,
+                a: u8, // 8
+                b: u16, // 9
+                c: u16, // 9
+            },
+            ABx {
+                instruction: #opcode_name,
+                a: u8, // 8
+                bx: u32, // 18
+            },
+            AsBx {
+                instruction: #opcode_name,
+                a: u8, // 8
+                sbx: i32, // 1 + 17
+            },
+            Ax {
+                instruction: #opcode_name,
+                ax: u32, // 26
+            },
+        }
+
+        impl ::std::convert::TryFrom<Word> for #instruction_name {
+            type Error = #error_name;
+
+            fn try_from(instr: Word) -> Result<#instruction_name> {
+                let opcode = (instr >> OFFSET_OP) & BITMASK_OP;
+                let _enum: #opcode_name = #opcode_name::try_from(opcode as u8)?;
+                Ok(match _enum {
+                    #(
+                    | #opcode_name::#abc
+                    )*
+                    #(
+                    | #opcode_name::#ab
+                    )*
+                    #(
+                    | #opcode_name::#a
+                    )* => #instruction_name::ABC {
+                        instruction: _enum,
+                        a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
+                        b: ((instr >> OFFSET_B) & BITMASK_B) as u16,
+                        c: ((instr >> OFFSET_C) & BITMASK_C) as u16,
+                    },
+                    #(
+                    | #opcode_name::#abx
+                    )* => #instruction_name::ABx {
+                        instruction: _enum,
+                        a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
+                        bx: ((instr >> OFFSET_BX) & BITMASK_BX) as u32,
+                    },
+                    #(
+                    | #opcode_name::#asbx
+                    )* => #instruction_name::AsBx {
+                        instruction: _enum,
+                        a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
+                        sbx: ((instr >> OFFSET_BX) & BITMASK_BX) as i32,
+                    },
+                    #(
+                    | #opcode_name::#ax
+                    )* => #instruction_name::Ax {
+                        instruction: _enum,
+                        ax: ((instr >> OFFSET_A) & BITMASK_AX) as u32,
+                    }
+                })
+            }
+        }
+
     };
 
     result.into()

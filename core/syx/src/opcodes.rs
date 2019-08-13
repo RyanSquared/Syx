@@ -8,8 +8,6 @@ use std::convert::{TryFrom, TryInto};
 
 use super::object;
 
-pub type Word = u32;
-
 /* Word Format:
  * |0bBBBBBBBBB_CCCCCCCCC_AAAAAAAA_IIIIII| -> B, C, A, Instruction
  * |0bBBBBBBBBB_BBBBBBBBB_AAAAAAAA_IIIIII| -> Bx, A, Instruction
@@ -31,7 +29,7 @@ use super::errors::*;
 #[macro_use]
 use super::try_from_enum;
 
-bytecode! { OpCode | Error = ErrorKind::InvalidOpCode.into() =>
+bytecode! { Instruction | OpCode | Error = ErrorKind::InvalidOpCode.into() =>
     Move: AB = Register, Register; // R(A) := R(B)
     LoadK: ABx = Register, Constant; // R(A) = Kst(Bx)
     LoadKX: A = Register; // R(A) = Kst(extra arg); see ExtraArg
@@ -130,110 +128,6 @@ bytecode! { OpCode | Error = ErrorKind::InvalidOpCode.into() =>
   (*) All 'skips' (pc++) assume that next instruction is a jump.
 
 ===========================================================================*/
-
-#[derive(Debug, PartialEq)]
-pub enum Instruction {
-    ABC {
-        instruction: OpCode,
-        a: u8, // 8
-        b: u16, // 9
-        c: u16, // 9
-    },
-    ABx {
-        instruction: OpCode,
-        a: u8, // 8
-        bx: u32, // 18
-    },
-    AsBx {
-        instruction: OpCode,
-        a: u8, // 8
-        sbx: i32, // 1 + 17
-    },
-    Ax {
-        instruction: OpCode,
-        ax: u32, // 26
-    },
-}
-
-impl TryFrom<Word> for Instruction {
-    type Error = Error;
-
-    fn try_from(instr: Word) -> Result<Instruction> {
-        let opcode = (instr >> OFFSET_OP) & BITMASK_OP;
-        let _enum: OpCode = OpCode::try_from(opcode as u8)?;
-        Ok(match _enum {
-            | OpCode::Move     // A B
-            | OpCode::LoadKX   // A <extra arg>
-            | OpCode::LoadBool // A B C
-            | OpCode::LoadNil  // A B
-            | OpCode::GetUpval // A B
-            | OpCode::GetTabUp // A B C
-            | OpCode::GetTable // A B C
-            | OpCode::SetTabUp // A B C
-            | OpCode::SetUpval // A B
-            | OpCode::SetTable // A B C
-            | OpCode::NewTable // A B C
-            | OpCode::SelfLoad // A B C
-            | OpCode::Add  // A B C
-            | OpCode::Sub  // A B C
-            | OpCode::Mul  // A B C
-            | OpCode::Mod  // A B C
-            | OpCode::Pow  // A B C
-            | OpCode::Div  // A B C
-            | OpCode::IDiv // A B C
-            | OpCode::BAnd // A B C
-            | OpCode::BOr  // A B C
-            | OpCode::BXOr // A B C
-            | OpCode::Shl  // A B C
-            | OpCode::Shr  // A B C
-            | OpCode::Unm  // A B
-            | OpCode::BNot // A B
-            | OpCode::Not  // A B
-            | OpCode::Len  // A B
-            | OpCode::Concat   // A B C
-            | OpCode::Eq       // A B C
-            | OpCode::Lt       // A B C
-            | OpCode::Le       // A B C
-            | OpCode::Test     // A _ C
-            | OpCode::TestSet  // A B C
-            | OpCode::Call     // A B C
-            | OpCode::TailCall // A B C
-            | OpCode::Return   // A B
-            | OpCode::TForCall // A _ C
-            | OpCode::SetList  // A B C
-            | OpCode::VarArg   // A B
-            => Instruction::ABC {
-                instruction: _enum,
-                a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
-                b: ((instr >> OFFSET_B) & BITMASK_B) as u16,
-                c: ((instr >> OFFSET_C) & BITMASK_C) as u16,
-            },
-            | OpCode::LoadK
-            | OpCode::Closure
-            => {
-                Instruction::ABx {
-                    instruction: _enum,
-                    a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
-                    bx: ((instr >> OFFSET_BX) & BITMASK_BX) as u32,
-                }
-            },
-            | OpCode::Jmp
-            | OpCode::ForLoop
-            | OpCode::ForPrep
-            | OpCode::TForLoop
-            => Instruction::AsBx {
-                instruction: _enum,
-                a: ((instr >> OFFSET_A) & BITMASK_A) as u8,
-                sbx: ((instr >> OFFSET_BX) & BITMASK_BX) as i32,
-            },
-            | OpCode::ExtraArg
-            => Instruction::Ax {
-                instruction: _enum,
-                ax: ((instr >> OFFSET_A) & BITMASK_AX) as u32,
-            }
-        })
-    }
-}
 
 #[cfg(test)]
 mod tests {
